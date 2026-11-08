@@ -120,3 +120,21 @@ export interface ProductInput {
   is_active: boolean;
   links: Partial<Record<OrderPlatform, string>>;
 }
+
+// ---- Smart Search (AI) & lokasi ----
+export interface Coords {
+  lat: number;
+  lng: number;
+}
+
+export type SortMode = 'default' | 'termurah' | 'terdekat' | 'terpopuler' | 'terbaru';
+
+// Filter terstruktur hasil interpretasi AI (sudah divalidasi di Edge Function dan di aplikasi).
+export interface SmartFilter {
+  kategori: string | null;
+  tag: string[];
+  harga_maks: number | null;
+  urut: Exclude<SortMode, 'default'> | null;
+  gunakan_lokasi: boolean;
+  kata_kunci: string | null;
+}

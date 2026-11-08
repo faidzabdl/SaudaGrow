@@ -13,37 +13,50 @@ expo-env.d.ts
 .kotlin/
 *.orig.*
 *.jks
+*.keystore
 *.p8
 *.p12
 *.key
 *.mobileprovision
 
+# generated native folders (dibuat ulang oleh prebuild / EAS)
+/ios
+/android
+
+# build output & kredensial penandatanganan
+*.apk
+*.aab
+*.ipa
+credentials.json
+
 # Metro
 .metro-health-check*
 
-# debug
+# debug & log
 npm-debug.*
 yarn-debug.*
 yarn-error.*
-
-# macOS
-.DS_Store
-*.pem
-
-# local env files
-.env*.local
+*.log
+.eslintcache
 
 # typescript
 *.tsbuildinfo
 
-# generated native folders
-/ios
-/android
-
-# secrets (jangan pernah di-commit)
+# secrets (jangan pernah di-commit): semua varian .env, kecuali contohnya
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
 
 # Supabase CLI
 supabase/.temp/
 supabase/.branches/
+
+# Claude Code (pengaturan lokal)
+.claude/
+
+# editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

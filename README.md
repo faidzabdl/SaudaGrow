@@ -46,6 +46,28 @@ Expo (React Native) · Expo Router · TypeScript · Supabase (Auth, Postgres, St
 
 Authentication → Providers → Email: matikan **Confirm email** agar pendaftaran langsung bisa masuk (jika dibiarkan aktif, aplikasi menampilkan pesan untuk cek email). Login Google menyusul.
 
+## Smart Search (AI, Gemini)
+
+Kotak pencarian bisa memahami kalimat bebas, mis. "makanan pedas murah dekat sini". Tombol petir di kotak pencarian (atau tombol *search* di keyboard) mengirim kalimat itu ke Supabase Edge Function `smart-search`, yang meminta Gemini mengubahnya menjadi filter terstruktur (kategori, tag, harga maksimum, urutan, pakai lokasi). Aplikasi menerapkan filter itu pada pencarian biasa dan menampilkannya sebagai chip yang bisa dihapus satu per satu.
+
+**Transparansi dan privasi**
+- Yang dikirim ke AI: hanya teks pencarian dan daftar kategori/tag katalog. Tidak ada id pengguna, email, ataupun lokasi. Teks pencarian tidak disimpan dan tidak ditulis ke log.
+- Lokasi perangkat hanya dipakai di perangkat untuk menghitung jarak. Izin diminta saat fitur jarak dipakai.
+- UI memberi label "Dibantu AI" dan penjelasan singkat; hasil AI bisa keliru sehingga pengguna dapat mengubahnya lewat chip.
+- Kunci API hanya ada sebagai secret server, tidak di aplikasi dan tidak di repo.
+- Keluaran model divalidasi di server dan di aplikasi; nilai di luar daftar kategori/tag/rentang harga dibuang.
+
+**Cadangan**: bila AI gagal, lambat (batas 8 detik di server, 10 detik di aplikasi), atau kuota habis, aplikasi otomatis memakai pencarian kata kunci biasa dan memberi tahu pengguna.
+
+**Pemasangan (Supabase Dashboard)**
+1. Buat API key di Google AI Studio.
+2. Dashboard -> Edge Functions -> *Deploy a new function* -> *Via Editor*, nama `smart-search`, tempel isi `supabase/functions/smart-search/index.ts`, lalu Deploy.
+3. Edge Functions -> Secrets: tambah `GEMINI_API_KEY` (wajib) dan `GEMINI_MODEL` (opsional, bawaan `gemini-3.5-flash-lite`; bila Google menjawab 404 untuk nama model, fungsi otomatis mencoba `gemini-3.1-flash-lite` lalu `gemini-2.5-flash-lite`).
+4. Pengaturan fungsi: matikan *Verify JWT* (kunci `publishable` bukan JWT). Fungsi punya batas panjang masukan dan pembatas laju sendiri.
+5. Uji tanpa aplikasi (PowerShell), ganti `<project-ref>`:
+   `Invoke-RestMethod -Method Post -Uri "https://<project-ref>.supabase.co/functions/v1/smart-search" -ContentType "application/json" -Body '{"query":"ayam pedas murah dekat sini","categories":["Nasi & Lauk"],"tags":["pedas","ayam"]}'`
+   Hasil yang benar: `ok: True` dan objek `filter`.
+
 ## Uji dashboard UMKM (Gelombang 3b)
 
 1. Masuk dengan akun UMKM yang sudah disetujui → Profil → **Dashboard UMKM**.
@@ -86,11 +108,11 @@ app/            layar (Expo Router)
 context/        AppContext: katalog, like, simpan (membaca Supabase)
 src/config.ts   nama aplikasi dan konstanta bersama
 src/lib/        klien Supabase, dialog lintas platform
-src/services/   akses data (auth, katalog, interaksi, kelola produk, storage)
+src/services/   akses data (auth, katalog, interaksi, kelola produk, storage, lokasi, smart search)
 src/context/    AuthContext (sesi dan peran)
 src/components/ RequireRole, RemoteImage, ProductForm
 src/types.ts    tipe bersama
-supabase/       schema.sql (skema + RLS), seed.sql (data contoh)
+supabase/       schema.sql (skema + RLS), seed.sql (data contoh), functions/smart-search (Edge Function AI)
 eas.json        profil build (preview = APK)
 planRevisi.md   rencana, cakupan fitur, jadwal
 ```
