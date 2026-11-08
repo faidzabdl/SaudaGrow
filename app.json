@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Saudagrow",
+    "slug": "saudagrow",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "saudagrow",
+    "ios": {
+      "supportsTablet": false
+    },
+    "android": {
+      "package": "com.saudagrow.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FF6B35",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Saudagrow membutuhkan akses foto untuk mengunggah logo dan foto produk UMKM."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Saudagrow memakai lokasi untuk mengisi koordinat UMKM dan menampilkan makanan terdekat."
+        }
+      ]
+    ]
+  }
+}

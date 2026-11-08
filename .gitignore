@@ -1,0 +1,62 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.keystore
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# generated native folders (dibuat ulang oleh prebuild / EAS)
+/ios
+/android
+
+# build output & kredensial penandatanganan
+*.apk
+*.aab
+*.ipa
+credentials.json
+
+# Metro
+.metro-health-check*
+
+# debug & log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+.eslintcache
+
+# typescript
+*.tsbuildinfo
+
+# secrets (jangan pernah di-commit): semua varian .env, kecuali contohnya
+.env
+.env.*
+!.env.example
+*.pem
+
+# Supabase CLI
+supabase/.temp/
+supabase/.branches/
+
+# Claude Code (pengaturan lokal, tidak berguna untuk juri)
+.claude/
+
+# editor & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
