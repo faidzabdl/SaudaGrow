@@ -90,3 +90,33 @@ export interface FeedItem {
   product: CatalogProduct;
   like_count: number;
 }
+
+// ---- Dashboard UMKM (kelola konten) ----
+export type ManagedVideo = Video & { like_count: number };
+
+export interface ManagedProduct extends Product {
+  order_links: OrderLink[];
+  videos: ManagedVideo[];
+  save_count: number;
+  order_count: number;
+}
+
+export interface DashboardStats {
+  products: number;
+  videos: number;
+  likes: number;
+  saves: number;
+  orders: number;
+  byPlatform: Record<OrderPlatform, number>;
+}
+
+export interface ProductInput {
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  tags: string[];
+  image_url: string | null;
+  is_active: boolean;
+  links: Partial<Record<OrderPlatform, string>>;
+}

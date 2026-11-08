@@ -4,7 +4,7 @@ Platform *discovery* UMKM kuliner berbasis video vertikal pendek. Pengguna menem
 
 Dibuat untuk Logicodix 2026 Hackathon (subtema *Local MSME & Creative Economy*).
 
-> Status: **Tahap 0** (persiapan dasar). Tampilan masih memakai data contoh (`data/mockData.ts`). Penyambungan ke Supabase dikerjakan bertahap, lihat `planRevisi.md`.
+> Status: **Tahap 3b**. Auth, daftar UMKM, verifikasi admin, feed video, like/simpan/Pesan, dan dashboard UMKM (produk, link pemesanan, upload video, statistik) sudah memakai Supabase. Sisa pekerjaan (Smart Search, fitur Tingkat B, pembersihan) ada di `planRevisi.md`.
 
 ## Teknologi
 
@@ -46,6 +46,13 @@ Expo (React Native) · Expo Router · TypeScript · Supabase (Auth, Postgres, St
 
 Authentication → Providers → Email: matikan **Confirm email** agar pendaftaran langsung bisa masuk (jika dibiarkan aktif, aplikasi menampilkan pesan untuk cek email). Login Google menyusul.
 
+## Uji dashboard UMKM (Gelombang 3b)
+
+1. Masuk dengan akun UMKM yang sudah disetujui → Profil → **Dashboard UMKM**.
+2. **Produk**: tambah produk (nama, harga, kategori, foto, tag, link pemesanan), ubah, nonaktifkan, dan hapus. Perubahan langsung terlihat di Home dan Cari.
+3. **Video**: pada kartu produk, "Tambah video" lalu pilih video MP4/MOV (maks. 60 detik dan 50 MB). Video muncul di Home.
+4. **Statistik**: jumlah suka, simpan, dan klik Pesan (total dan per platform) berasal dari data nyata; coba tekan Pesan dari akun lain lalu tarik layar dashboard ke bawah.
+
 ## Uji feed dan interaksi (Gelombang 3a)
 
 1. Jalankan `supabase/seed.sql` (ubah `v_base` dulu) agar ada data. Tanpa seed, Home menampilkan "Belum ada video".
@@ -76,10 +83,12 @@ Klik **Pesan** (pengguna → produk → platform → waktu), like, dan simpan. D
 
 ```
 app/            layar (Expo Router)
-context/        state sementara (akan digantikan Supabase)
-data/           data contoh
+context/        AppContext: katalog, like, simpan (membaca Supabase)
 src/config.ts   nama aplikasi dan konstanta bersama
-src/lib/        klien Supabase
+src/lib/        klien Supabase, dialog lintas platform
+src/services/   akses data (auth, katalog, interaksi, kelola produk, storage)
+src/context/    AuthContext (sesi dan peran)
+src/components/ RequireRole, RemoteImage, ProductForm
 src/types.ts    tipe bersama
 supabase/       schema.sql (skema + RLS), seed.sql (data contoh)
 eas.json        profil build (preview = APK)

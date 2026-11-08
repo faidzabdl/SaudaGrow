@@ -1,38 +1,147 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Image, TouchableOpacity,
-  Modal, TextInput, FlatList,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl, ActivityIndicator, Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import type { FeatherName } from '../src/types';
-import { notify } from '../src/lib/dialog';
+import * as ImagePicker from 'expo-image-picker';
 import { RequireRole } from '../src/components/RequireRole';
-import { UMKM_LIST, CATEGORIES, PRODUCTS, VIDEO_FEEDS, Product, VideoFeed } from '../data/mockData';
+import { ProductForm } from '../src/components/ProductForm';
+import { RemoteImage } from '../src/components/RemoteImage';
+import { useAuth } from '../src/context/AuthContext';
+import { useApp } from '../context/AppContext';
+import { confirmDialog, notify } from '../src/lib/dialog';
+import {
+  PLATFORMS, addVideoRow, deleteProduct, deleteVideo, emptyStats, fetchMyProducts,
+  removeVideoFiles, setProductActive,
+} from '../src/services/manage';
+import { MAX_VIDEO_BYTES, MAX_VIDEO_SEC, uploadVideo } from '../src/services/storage';
+import type { DashboardStats, FeatherName, ManagedProduct } from '../src/types';
 
-// SEMENTARA (sampai Gelombang 3): data dashboard masih mock milik UMKM 'u1'.
-const MY_UMKM_ID = 'u1';
+export default function UmkmDashboardScreen() {
+  return (
+    <RequireRole allow={['umkm']}>
+      <DashboardContent />
+    </RequireRole>
+  );
+}
 
 function DashboardContent() {
-  // SEMENTARA (sampai Gelombang 3b): dashboard memakai data contoh lokal yang TIDAK tersimpan di server.
-  const [products, setProducts] = useState<Product[]>(PRODUCTS);
-  const [videos, setVideos] = useState<VideoFeed[]>(VIDEO_FEEDS);
-  const updateProduct = (p: Product) => setProducts(prev => prev.map(x => (x.id === p.id ? p : x)));
-  const addProduct = (p: Product) => setProducts(prev => [...prev, p]);
-  const addVideo = (v: VideoFeed) => setVideos(prev => [v, ...prev]);
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'products' | 'videos'>('products');
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [showVideoModal, setShowVideoModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const { session, umkm } = useAuth();
+  const { reload: reloadCatalog } = useApp(); // agar Home/Cari ikut menampilkan perubahan
+  const userId = session?.user.id ?? '';
 
-  const myProducts = products.filter(p => p.umkmId === MY_UMKM_ID);
-  const myVideos = videos.filter(v => v.umkmId === MY_UMKM_ID);
-  const myUMKM = UMKM_LIST.find(u => u.id === MY_UMKM_ID)!;
+  const [products, setProducts] = useState<ManagedProduct[]>([]);
+  const [stats, setStats] = useState<DashboardStats>(emptyStats());
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<ManagedProduct | null>(null);
 
-  const totalLikes = myVideos.reduce((acc, v) => acc + v.likes, 0);
-  const totalSaves = myVideos.reduce((acc, v) => acc + v.saves, 0);
+  const load = useCallback(async () => {
+    if (!umkm) return;
+    const res = await fetchMyProducts(umkm.id);
+    setProducts(res.data);
+    setStats(res.stats);
+    setError(res.error);
+  }, [umkm]);
+
+  const syncAll = useCallback(async () => {
+    await load();
+    await reloadCatalog();
+  }, [load, reloadCatalog]);
+
+  useFocusEffect(
+    useCallback(() => {
+      setLoading(true);
+      load().finally(() => setLoading(false));
+    }, [load])
+  );
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  };
+
+  const openNew = () => { setEditing(null); setFormOpen(true); };
+  const openEdit = (p: ManagedProduct) => { setEditing(p); setFormOpen(true); };
+
+  const toggleActive = async (p: ManagedProduct, value: boolean) => {
+    setBusyId(p.id);
+    const res = await setProductActive(p.id, value);
+    if (res.error) notify('Gagal mengubah status', res.error);
+    await syncAll();
+    setBusyId(null);
+  };
+
+  const removeProduct = async (p: ManagedProduct) => {
+    const ok = await confirmDialog({
+      title: 'Hapus produk?',
+      message: `"${p.name}" beserta ${p.videos.length} video dan link pemesanannya akan dihapus permanen.`,
+      confirmText: 'Hapus',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusyId(p.id);
+    const res = await deleteProduct(p);
+    if (res.error) notify('Gagal menghapus produk', res.error);
+    await syncAll();
+    setBusyId(null);
+  };
+
+  const addVideo = async (p: ManagedProduct) => {
+    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['videos'], allowsEditing: false });
+    if (res.canceled) return;
+    const a = res.assets[0];
+
+    const mime = a.mimeType ?? 'video/mp4';
+    if (mime !== 'video/mp4' && mime !== 'video/quicktime') {
+      return notify('Format tidak didukung', 'Gunakan video MP4 atau MOV.');
+    }
+    const sec = a.duration != null ? Math.max(1, Math.ceil(a.duration / 1000)) : null;
+    if (sec != null && sec > MAX_VIDEO_SEC) {
+      return notify('Video terlalu panjang', `Maksimal ${MAX_VIDEO_SEC} detik. Video ini ${sec} detik.`);
+    }
+    if (a.fileSize != null && a.fileSize > MAX_VIDEO_BYTES) {
+      return notify('Ukuran terlalu besar', `Maksimal ${MAX_VIDEO_BYTES / 1024 / 1024} MB. Kompres atau pilih video yang lebih pendek.`);
+    }
+
+    setUploadingId(p.id);
+    const up = await uploadVideo(userId, a.uri, mime);
+    if (!up.path) {
+      setUploadingId(null);
+      return notify('Gagal mengunggah video', up.error ?? 'Coba lagi.');
+    }
+    const row = await addVideoRow(p.id, up.path, sec);
+    if (row.error) {
+      await removeVideoFiles([up.path]); // jangan tinggalkan file yatim di Storage
+      notify('Gagal menyimpan video', row.error);
+    }
+    await syncAll();
+    setUploadingId(null);
+  };
+
+  const removeVideo = async (p: ManagedProduct, index: number) => {
+    const v = p.videos[index];
+    const ok = await confirmDialog({
+      title: 'Hapus video?',
+      message: `Video ${index + 1} dari "${p.name}" akan dihapus permanen.`,
+      confirmText: 'Hapus',
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusyId(p.id);
+    const res = await deleteVideo(v);
+    if (res.error) notify('Gagal menghapus video', res.error);
+    await syncAll();
+    setBusyId(null);
+  };
 
   return (
     <View style={styles.container}>
@@ -42,332 +151,146 @@ function DashboardContent() {
             <Feather name="arrow-left" size={20} color="#fff" />
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
-            <Text style={styles.title}>Dashboard UMKM</Text>
-            <Text style={styles.subtitle}>{myUMKM.name}</Text>
+            <Text style={styles.title} numberOfLines={1}>{umkm?.name ?? 'Dashboard UMKM'}</Text>
+            <Text style={styles.subtitle}>Kelola produk, video, dan lihat statistik</Text>
           </View>
-          <Image source={{ uri: myUMKM.avatar }} style={styles.umkmAvatar} />
         </View>
       </SafeAreaView>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Stats */}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#FF6B35" />}
+      >
         <View style={styles.statsRow}>
-          <StatCard icon="package" color="#FF6B35" label="Produk" value={myProducts.length} />
-          <StatCard icon="film" color="#3B82F6" label="Video" value={myVideos.length} />
-          <StatCard icon="heart" color="#FF3B5C" label="Likes" value={totalLikes} />
-          <StatCard icon="bookmark" color="#10B981" label="Saved" value={totalSaves} />
+          <Stat icon="package" label="Produk" value={stats.products} />
+          <Stat icon="film" label="Video" value={stats.videos} />
+          <Stat icon="heart" label="Suka" value={stats.likes} />
+          <Stat icon="bookmark" label="Disimpan" value={stats.saves} />
+          <Stat icon="shopping-bag" label="Klik Pesan" value={stats.orders} />
         </View>
 
-        {/* Tabs */}
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'products' && styles.tabActive]}
-            onPress={() => setActiveTab('products')}
-          >
-            <Feather name="package" size={15} color={activeTab === 'products' ? '#FF6B35' : '#9CA3AF'} />
-            <Text style={[styles.tabText, activeTab === 'products' && styles.tabTextActive]}>Produk</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'videos' && styles.tabActive]}
-            onPress={() => setActiveTab('videos')}
-          >
-            <Feather name="film" size={15} color={activeTab === 'videos' ? '#FF6B35' : '#9CA3AF'} />
-            <Text style={[styles.tabText, activeTab === 'videos' && styles.tabTextActive]}>Video</Text>
-          </TouchableOpacity>
-        </View>
-
-        {activeTab === 'products' ? (
-          <View style={styles.section}>
-            <TouchableOpacity style={styles.addBtn} onPress={() => { setEditingProduct(null); setShowProductModal(true); }}>
-              <Feather name="plus" size={16} color="#fff" />
-              <Text style={styles.addBtnText}>Tambah Produk</Text>
-            </TouchableOpacity>
-
-            {myProducts.map(p => (
-              <View key={p.id} style={styles.productRow}>
-                <Image source={{ uri: p.image }} style={styles.productThumb} />
-                <View style={styles.productInfo}>
-                  <Text style={styles.productName} numberOfLines={2}>{p.name}</Text>
-                  <Text style={styles.productPrice}>Rp {p.price.toLocaleString('id-ID')}</Text>
-                  <View style={styles.ratingRow}>
-                    <Feather name="star" size={11} color="#FBBF24" />
-                    <Text style={styles.ratingText}>{p.rating} ({p.reviewCount})</Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  style={styles.editBtn}
-                  onPress={() => { setEditingProduct(p); setShowProductModal(true); }}
-                >
-                  <Feather name="edit-2" size={16} color="#FF8C42" />
-                </TouchableOpacity>
+        <View style={styles.platformCard}>
+          <Text style={styles.platformTitle}>Klik Pesan per platform</Text>
+          <View style={styles.platformRow}>
+            {PLATFORMS.map(p => (
+              <View key={p.key} style={styles.platformItem}>
+                <Text style={styles.platformValue}>{stats.byPlatform[p.key]}</Text>
+                <Text style={styles.platformLabel}>{p.label}</Text>
               </View>
             ))}
           </View>
-        ) : (
-          <View style={styles.section}>
-            <TouchableOpacity style={styles.addBtn} onPress={() => setShowVideoModal(true)}>
-              <Feather name="plus" size={16} color="#fff" />
-              <Text style={styles.addBtnText}>Tambah Video</Text>
-            </TouchableOpacity>
+        </View>
 
-            {myVideos.map(v => {
-              const prod = products.find(p => p.id === v.productId);
-              return (
-                <View key={v.id} style={styles.videoRow}>
-                  <Image source={{ uri: v.image }} style={styles.videoThumb} />
-                  <View style={styles.videoInfo}>
-                    <Text style={styles.videoCaption} numberOfLines={2}>{v.caption}</Text>
-                    <Text style={styles.videoProduct}>📦 {prod?.name}</Text>
-                    <Text style={styles.videoProductPrice}>💰 Rp {prod?.price.toLocaleString('id-ID')}</Text>
-                    <View style={styles.videoStats}>
-                      <View style={styles.videoStat}>
-                        <Feather name="heart" size={11} color="#FF3B5C" />
-                        <Text style={styles.videoStatText}>{v.likes.toLocaleString()}</Text>
-                      </View>
-                      <View style={styles.videoStat}>
-                        <Feather name="message-circle" size={11} color="#3B82F6" />
-                        <Text style={styles.videoStatText}>{v.comments}</Text>
-                      </View>
-                      <View style={styles.videoStat}>
-                        <Feather name="bookmark" size={11} color="#10B981" />
-                        <Text style={styles.videoStatText}>{v.saves}</Text>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
+        <View style={styles.listHeader}>
+          <Text style={styles.sectionTitle}>Produk Saya</Text>
+          <TouchableOpacity style={styles.addBtn} onPress={openNew}>
+            <Feather name="plus" size={16} color="#fff" />
+            <Text style={styles.addBtnText}>Produk</Text>
+          </TouchableOpacity>
+        </View>
+
+        {error && (
+          <View style={styles.errorBox}>
+            <Text style={styles.errorText}>Gagal memuat data: {error}</Text>
+          </View>
+        )}
+        {loading && <ActivityIndicator color="#FF6B35" style={{ marginTop: 16 }} />}
+        {!loading && products.length === 0 && !error && (
+          <View style={styles.empty}>
+            <Feather name="package" size={44} color="#374151" />
+            <Text style={styles.emptyText}>Belum ada produk</Text>
+            <Text style={styles.emptyHint}>Tambahkan produk pertama, lalu unggah videonya agar muncul di Home.</Text>
           </View>
         )}
 
+        {products.map(p => (
+          <View key={p.id} style={[styles.card, !p.is_active && { opacity: 0.7 }]}>
+            <View style={styles.cardTop}>
+              <RemoteImage uri={p.image_url} style={styles.thumb} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.cardName} numberOfLines={2}>{p.name}</Text>
+                <Text style={styles.cardPrice}>Rp {p.price.toLocaleString('id-ID')}</Text>
+                <Text style={styles.cardMeta}>
+                  ♥ {p.videos.reduce((n, v) => n + v.like_count, 0)}  ·  ⚑ {p.save_count}  ·  🛒 {p.order_count}
+                </Text>
+              </View>
+              {busyId === p.id ? (
+                <ActivityIndicator color="#FF6B35" />
+              ) : (
+                <Switch
+                  value={p.is_active}
+                  onValueChange={v => toggleActive(p, v)}
+                  trackColor={{ true: '#FF6B35', false: '#374151' }}
+                />
+              )}
+            </View>
+            {!p.is_active && <Text style={styles.hiddenNote}>Disembunyikan dari aplikasi</Text>}
+            {p.order_links.length === 0 && <Text style={styles.warnNote}>Belum ada link pemesanan</Text>}
+
+            {/* Video */}
+            <View style={styles.videoBlock}>
+              <Text style={styles.videoTitle}>Video ({p.videos.length})</Text>
+              {p.videos.map((v, i) => (
+                <View key={v.id} style={styles.videoRow}>
+                  <Feather name="film" size={14} color="#9CA3AF" />
+                  <Text style={styles.videoText}>
+                    Video {i + 1}{v.duration_sec ? ` · ${v.duration_sec} dtk` : ''} · ♥ {v.like_count}
+                  </Text>
+                  <TouchableOpacity onPress={() => removeVideo(p, i)} hitSlop={8}>
+                    <Feather name="trash-2" size={15} color="#EF4444" />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              {uploadingId === p.id ? (
+                <View style={styles.uploading}>
+                  <ActivityIndicator color="#FF6B35" />
+                  <Text style={styles.uploadingText}>Mengunggah video… jangan tutup aplikasi.</Text>
+                </View>
+              ) : (
+                <TouchableOpacity style={styles.videoAdd} onPress={() => addVideo(p)} disabled={uploadingId !== null}>
+                  <Feather name="upload" size={14} color="#FF6B35" />
+                  <Text style={styles.videoAddText}>Tambah video (maks. {MAX_VIDEO_SEC} dtk)</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <View style={styles.actionRow}>
+              <TouchableOpacity style={styles.editBtn} onPress={() => openEdit(p)}>
+                <Feather name="edit-2" size={14} color="#fff" />
+                <Text style={styles.editBtnText}>Ubah</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.deleteBtn} onPress={() => removeProduct(p)}>
+                <Feather name="trash-2" size={14} color="#EF4444" />
+                <Text style={styles.deleteBtnText}>Hapus</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
         <View style={{ height: 40 }} />
       </ScrollView>
 
-      {/* Product Modal */}
-      <ProductModal
-        visible={showProductModal}
-        product={editingProduct}
-        umkmId={MY_UMKM_ID}
-        onClose={() => setShowProductModal(false)}
-        onSave={(p) => {
-          if (editingProduct) updateProduct(p);
-          else addProduct(p);
-          setShowProductModal(false);
-          notify('Berhasil', editingProduct ? 'Produk diperbarui!' : 'Produk ditambahkan!');
-        }}
-      />
-
-      {/* Video Modal */}
-      <VideoModal
-        visible={showVideoModal}
-        myProducts={myProducts}
-        umkmId={MY_UMKM_ID}
-        onClose={() => setShowVideoModal(false)}
-        onSave={(v) => {
-          addVideo(v);
-          setShowVideoModal(false);
-          notify('Berhasil', 'Video ditambahkan ke feed!');
-        }}
-      />
+      {umkm && (
+        <ProductForm
+          visible={formOpen}
+          product={editing}
+          umkmId={umkm.id}
+          userId={userId}
+          onClose={() => setFormOpen(false)}
+          onSaved={() => {
+            setFormOpen(false);
+            syncAll();
+          }}
+        />
+      )}
     </View>
   );
 }
 
-// ── Product Modal ──────────────────────────────────────────────────────────────
-function ProductModal({ visible, product, umkmId, onClose, onSave }: {
-  visible: boolean;
-  product: Product | null;
-  umkmId: string;
-  onClose: () => void;
-  onSave: (p: Product) => void;
-}) {
-  const [name, setName] = useState('');
-  const [price, setPrice] = useState('');
-  const [desc, setDesc] = useState('');
-  const [category, setCategory] = useState(CATEGORIES[1]);
-
-  React.useEffect(() => {
-    if (product) {
-      setName(product.name);
-      setPrice(String(product.price));
-      setDesc(product.description);
-      setCategory(product.category);
-    } else {
-      setName(''); setPrice(''); setDesc(''); setCategory(CATEGORIES[1]);
-    }
-  }, [product, visible]);
-
-  const handleSave = () => {
-    if (!name.trim() || !price.trim()) {
-      notify('Error', 'Nama dan harga wajib diisi');
-      return;
-    }
-    const saved: Product = {
-      id: product?.id ?? `p_${Date.now()}`,
-      umkmId,
-      name: name.trim(),
-      price: parseInt(price.replace(/\D/g, '')) || 0,
-      description: desc.trim() || 'Produk UMKM terpercaya.',
-      category,
-      rating: product?.rating ?? 4.5,
-      reviewCount: product?.reviewCount ?? 0,
-      image: product?.image ?? `https://images.unsplash.com/photo-1512058564366-18510be2db19?w=600`,
-      tags: [category.toLowerCase().split(' ')[0]],
-      isPopular: product?.isPopular,
-    };
-    onSave(saved);
-  };
-
+function Stat({ icon, label, value }: { icon: FeatherName; label: string; value: number }) {
   return (
-    <Modal visible={visible} transparent animationType="slide">
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>{product ? 'Edit Produk' : 'Tambah Produk Baru'}</Text>
-
-          <Text style={styles.inputLabel}>Nama Produk</Text>
-          <TextInput
-            style={styles.input}
-            value={name}
-            onChangeText={setName}
-            placeholder="Contoh: Nasi Uduk Spesial"
-            placeholderTextColor="#6B7280"
-          />
-
-          <Text style={styles.inputLabel}>Harga (Rp)</Text>
-          <TextInput
-            style={styles.input}
-            value={price}
-            onChangeText={setPrice}
-            placeholder="Contoh: 25000"
-            placeholderTextColor="#6B7280"
-            keyboardType="numeric"
-          />
-
-          <Text style={styles.inputLabel}>Kategori</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
-            <View style={{ flexDirection: 'row', gap: 8 }}>
-              {CATEGORIES.slice(1).map(cat => (
-                <TouchableOpacity
-                  key={cat}
-                  style={[styles.catChip, category === cat && styles.catChipActive]}
-                  onPress={() => setCategory(cat)}
-                >
-                  <Text style={[styles.catChipText, category === cat && styles.catChipTextActive]}>{cat}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </ScrollView>
-
-          <Text style={styles.inputLabel}>Deskripsi (opsional)</Text>
-          <TextInput
-            style={[styles.input, styles.inputMultiline]}
-            value={desc}
-            onChangeText={setDesc}
-            placeholder="Ceritakan produkmu..."
-            placeholderTextColor="#6B7280"
-            multiline
-            numberOfLines={3}
-          />
-
-          <View style={styles.modalButtons}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-              <Text style={styles.cancelBtnText}>Batal</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-              <Text style={styles.saveBtnText}>Simpan</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-// ── Video Modal ────────────────────────────────────────────────────────────────
-function VideoModal({ visible, myProducts, umkmId, onClose, onSave }: {
-  visible: boolean;
-  myProducts: Product[];
-  umkmId: string;
-  onClose: () => void;
-  onSave: (v: VideoFeed) => void;
-}) {
-  const [selectedProductId, setSelectedProductId] = useState('');
-  const [caption, setCaption] = useState('');
-
-  React.useEffect(() => {
-    if (visible) { setSelectedProductId(''); setCaption(''); }
-  }, [visible]);
-
-  const handleSave = () => {
-    if (!selectedProductId) { notify('Error', 'Pilih produk terlebih dahulu'); return; }
-    const prod = myProducts.find(p => p.id === selectedProductId);
-    const video: VideoFeed = {
-      id: `v_${Date.now()}`,
-      productId: selectedProductId,
-      umkmId,
-      image: prod?.image ?? 'https://images.unsplash.com/photo-1512058564366-18510be2db19?w=800&h=1200&fit=crop',
-      caption: caption.trim() || `Coba ${prod?.name} sekarang! 🔥`,
-      likes: 0, comments: 0, saves: 0,
-    };
-    onSave(video);
-  };
-
-  return (
-    <Modal visible={visible} transparent animationType="slide">
-      <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={onClose}>
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>Tambah Video Baru</Text>
-
-          <Text style={styles.inputLabel}>Pilih Produk</Text>
-          <ScrollView style={{ maxHeight: 200, marginBottom: 12 }}>
-            {myProducts.map(p => (
-              <TouchableOpacity
-                key={p.id}
-                style={[styles.productPick, selectedProductId === p.id && styles.productPickActive]}
-                onPress={() => setSelectedProductId(p.id)}
-              >
-                <Image source={{ uri: p.image }} style={styles.productPickImg} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.productPickName}>{p.name}</Text>
-                  <Text style={styles.productPickPrice}>Rp {p.price.toLocaleString('id-ID')}</Text>
-                </View>
-                {selectedProductId === p.id && <Feather name="check-circle" size={20} color="#FF6B35" />}
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
-          <Text style={styles.inputLabel}>Caption Video</Text>
-          <TextInput
-            style={[styles.input, styles.inputMultiline]}
-            value={caption}
-            onChangeText={setCaption}
-            placeholder="Tulis caption menarik..."
-            placeholderTextColor="#6B7280"
-            multiline numberOfLines={3}
-          />
-          <Text style={styles.inputHint}>*Gambar produk akan digunakan sebagai thumbnail video</Text>
-
-          <View style={styles.modalButtons}>
-            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
-              <Text style={styles.cancelBtnText}>Batal</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
-              <Text style={styles.saveBtnText}>Tambahkan</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </TouchableOpacity>
-    </Modal>
-  );
-}
-
-function StatCard({ icon, color, label, value }: { icon: FeatherName; color: string; label: string; value: number }) {
-  return (
-    <View style={[styles.statCard, { borderColor: color + '44' }]}>
-      <Feather name={icon} size={20} color={color} />
-      <Text style={styles.statValue}>{value >= 1000 ? `${(value / 1000).toFixed(1)}K` : value}</Text>
+    <View style={styles.stat}>
+      <Feather name={icon} size={16} color="#FF6B35" />
+      <Text style={styles.statValue}>{value}</Text>
       <Text style={styles.statLabel}>{label}</Text>
     </View>
   );
@@ -375,69 +298,50 @@ function StatCard({ icon, color, label, value }: { icon: FeatherName; color: str
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111' },
-  header: { backgroundColor: '#1A1A1A', paddingBottom: 16 },
+  header: { backgroundColor: '#1A1A1A', paddingBottom: 12 },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, gap: 12 },
   backBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#2A2A2A', alignItems: 'center', justifyContent: 'center' },
   title: { color: '#fff', fontSize: 18, fontWeight: '800' },
   subtitle: { color: '#9CA3AF', fontSize: 12, marginTop: 2 },
-  umkmAvatar: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FF6B35' },
-  statsRow: { flexDirection: 'row', gap: 8, padding: 16 },
-  statCard: { flex: 1, backgroundColor: '#1E1E1E', borderRadius: 12, padding: 12, alignItems: 'center', borderWidth: 1 },
-  statValue: { color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 6 },
-  statLabel: { color: '#9CA3AF', fontSize: 10, marginTop: 2 },
-  tabs: { flexDirection: 'row', backgroundColor: '#1A1A1A', marginBottom: 2 },
-  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: 'transparent' },
-  tabActive: { borderBottomColor: '#FF6B35' },
-  tabText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: '#FF6B35' },
-  section: { padding: 16 },
-  addBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FF6B35', borderRadius: 12, paddingVertical: 12, marginBottom: 16 },
-  addBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  productRow: { flexDirection: 'row', backgroundColor: '#1E1E1E', borderRadius: 12, overflow: 'hidden', marginBottom: 10, borderWidth: 1, borderColor: '#2A2A2A', alignItems: 'center' },
-  productThumb: { width: 80, height: 80 },
-  productInfo: { flex: 1, padding: 12 },
-  productName: { color: '#fff', fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  productPrice: { color: '#FF8C42', fontSize: 14, fontWeight: '700', marginBottom: 4 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingText: { color: '#FBBF24', fontSize: 11 },
-  editBtn: { padding: 16 },
-  videoRow: { flexDirection: 'row', backgroundColor: '#1E1E1E', borderRadius: 12, overflow: 'hidden', marginBottom: 10, borderWidth: 1, borderColor: '#2A2A2A', alignItems: 'center' },
-  videoThumb: { width: 70, height: 100 },
-  videoInfo: { flex: 1, padding: 12 },
-  videoCaption: { color: '#E5E7EB', fontSize: 12, lineHeight: 18, marginBottom: 6 },
-  videoProduct: { color: '#9CA3AF', fontSize: 11, marginBottom: 2 },
-  videoProductPrice: { color: '#FF8C42', fontSize: 12, fontWeight: '700', marginBottom: 6 },
-  videoStats: { flexDirection: 'row', gap: 12 },
-  videoStat: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  videoStatText: { color: '#9CA3AF', fontSize: 11 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
-  modalSheet: { backgroundColor: '#1A1A1A', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 24, paddingBottom: 40 },
-  modalHandle: { width: 36, height: 4, backgroundColor: '#374151', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 16 },
-  inputLabel: { color: '#9CA3AF', fontSize: 12, fontWeight: '600', marginBottom: 6, textTransform: 'uppercase' },
-  input: { backgroundColor: '#2A2A2A', borderRadius: 10, padding: 12, color: '#fff', fontSize: 14, marginBottom: 14, borderWidth: 1, borderColor: '#374151' },
-  inputMultiline: { height: 80, textAlignVertical: 'top' },
-  inputHint: { color: '#6B7280', fontSize: 11, marginBottom: 14 },
-  modalButtons: { flexDirection: 'row', gap: 10 },
-  cancelBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, backgroundColor: '#2A2A2A', alignItems: 'center' },
-  cancelBtnText: { color: '#9CA3AF', fontSize: 14, fontWeight: '600' },
-  saveBtn: { flex: 1, paddingVertical: 13, borderRadius: 12, backgroundColor: '#FF6B35', alignItems: 'center' },
-  saveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  catChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#2A2A2A', borderWidth: 1, borderColor: '#374151' },
-  catChipActive: { backgroundColor: '#FF6B35', borderColor: '#FF6B35' },
-  catChipText: { color: '#9CA3AF', fontSize: 12 },
-  catChipTextActive: { color: '#fff', fontWeight: '600' },
-  productPick: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, borderRadius: 10, backgroundColor: '#2A2A2A', marginBottom: 6 },
-  productPickActive: { backgroundColor: '#2D1F18', borderWidth: 1, borderColor: '#FF6B35' },
-  productPickImg: { width: 40, height: 40, borderRadius: 8 },
-  productPickName: { color: '#fff', fontSize: 13, fontWeight: '600' },
-  productPickPrice: { color: '#FF8C42', fontSize: 11 },
+  content: { padding: 16, gap: 12 },
+  statsRow: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, backgroundColor: '#1A1A1A', borderRadius: 12, paddingVertical: 12, alignItems: 'center', gap: 2 },
+  statValue: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  statLabel: { color: '#9CA3AF', fontSize: 10 },
+  platformCard: { backgroundColor: '#1A1A1A', borderRadius: 12, padding: 14 },
+  platformTitle: { color: '#9CA3AF', fontSize: 12, fontWeight: '600', marginBottom: 10 },
+  platformRow: { flexDirection: 'row' },
+  platformItem: { flex: 1, alignItems: 'center' },
+  platformValue: { color: '#fff', fontSize: 18, fontWeight: '800' },
+  platformLabel: { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  listHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  sectionTitle: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#FF6B35', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 18 },
+  addBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  errorBox: { padding: 10, borderRadius: 10, backgroundColor: '#EF444422', borderWidth: 1, borderColor: '#EF4444' },
+  errorText: { color: '#EF4444', fontSize: 12 },
+  empty: { alignItems: 'center', paddingVertical: 32, gap: 8 },
+  emptyText: { color: '#E5E7EB', fontWeight: '700' },
+  emptyHint: { color: '#6B7280', fontSize: 12, textAlign: 'center' },
+  card: { backgroundColor: '#1A1A1A', borderRadius: 14, padding: 14, gap: 10 },
+  cardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  thumb: { width: 64, height: 64, borderRadius: 10 },
+  cardName: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  cardPrice: { color: '#FF8C42', fontSize: 13, fontWeight: '700', marginTop: 2 },
+  cardMeta: { color: '#9CA3AF', fontSize: 11, marginTop: 4 },
+  hiddenNote: { color: '#FBBF24', fontSize: 12 },
+  warnNote: { color: '#FBBF24', fontSize: 12 },
+  videoBlock: { backgroundColor: '#111', borderRadius: 10, padding: 10, gap: 8 },
+  videoTitle: { color: '#E5E7EB', fontSize: 13, fontWeight: '700' },
+  videoRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  videoText: { flex: 1, color: '#9CA3AF', fontSize: 12 },
+  videoAdd: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: 10, borderWidth: 1, borderColor: '#FF6B35', backgroundColor: '#FF6B3522' },
+  videoAddText: { color: '#FF6B35', fontWeight: '700', fontSize: 12 },
+  uploading: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  uploadingText: { color: '#9CA3AF', fontSize: 12, flex: 1 },
+  actionRow: { flexDirection: 'row', gap: 10 },
+  editBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: '#2A2A2A', paddingVertical: 10, borderRadius: 10 },
+  editBtnText: { color: '#fff', fontWeight: '700', fontSize: 13 },
+  deleteBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: '#EF4444', paddingVertical: 10, borderRadius: 10 },
+  deleteBtnText: { color: '#EF4444', fontWeight: '700', fontSize: 13 },
 });
-
-export default function UmkmDashboardScreen() {
-  return (
-    <RequireRole allow={['umkm']}>
-      <DashboardContent />
-    </RequireRole>
-  );
-}
