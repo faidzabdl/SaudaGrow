@@ -21,12 +21,12 @@ const ORDER_OPTIONS: { label: string; badge: string; color: string; key: OrderPl
 ];
 
 export default function ProductDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
   const { products, feed, loading, savedProductIds, toggleSave, trackOrder } = useApp();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const guard = useLoginGuard();
-  const [activeTab, setActiveTab] = useState<'info' | 'umkm'>('info');
+  const [activeTab, setActiveTab] = useState<'info' | 'umkm'>(tab === 'umkm' ? 'umkm' : 'info');
 
   const product = products.find(p => p.id === id);
   const productVideos = feed.filter(f => f.product.id === id);

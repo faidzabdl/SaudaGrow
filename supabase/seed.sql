@@ -1,5 +1,5 @@
 -- =====================================================================
--- Saudagrow — seed.sql (data dummy untuk pengembangan & demo)
+-- SaudaGrow — seed.sql (data dummy untuk pengembangan & demo)
 -- Jalankan SETELAH schema.sql, di Supabase Dashboard -> SQL Editor.
 --
 -- Sebelum dijalankan:

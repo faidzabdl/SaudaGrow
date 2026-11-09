@@ -17,10 +17,15 @@ export interface RankInput {
   likedVideoIds: string[];
   savedProductIds: string[];
   now: number;
+  seed?: number | null; // null/undefined = tanpa pengacakan (urut murni berdasarkan skor)
+  seenVideoIds?: string[];
 }
 
 const W = { pop: 0.3, fresh: 0.25, dist: 0.15, aff: 0.3 };
 const DAY_MS = 24 * 60 * 60 * 1000;
+const SEEN_FACTOR = 0.35;
+const EPS = 0.05;
+const GAMMA = 2;
 
 const engagement = (i: FeedItem) => i.like_count + 2 * i.product.save_count + 3 * i.product.order_count;
 
@@ -36,6 +41,8 @@ export function scoreFeed(items: FeedItem[], input: RankInput): { item: FeedItem
   input.savedProductIds.forEach(id => bump(byProduct.get(id)?.product.category));
   const maxCat = Math.max(0, ...catCount.values());
   const hasHistory = maxCat > 0;
+
+  const seen = new Set(input.seenVideoIds ?? []);
 
   return items.map(item => {
     let sum = 0;
@@ -54,7 +61,8 @@ export function scoreFeed(items: FeedItem[], input: RankInput): { item: FeedItem
     if (hasHistory) {
       add(W.aff, (catCount.get(item.product.category ?? '') ?? 0) / maxCat);
     }
-    return { item, score: weight > 0 ? sum / weight : 0 };
+    const base = weight > 0 ? sum / weight : 0;
+    return { item, score: seen.has(item.video.id) ? base * SEEN_FACTOR : base };
   });
 }
 
@@ -73,9 +81,27 @@ export function diversify(items: FeedItem[]): FeedItem[] {
   return out;
 }
 
+// Bilangan acak deterministik di (0,1) dari seed + id (hash 32-bit); bukan Math.random supaya urutan stabil per seed.
+export function unitRandom(seed: number, id: string): number {
+  let h = (2166136261 ^ seed) >>> 0;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h ^= h >>> 13;
+  h = Math.imul(h, 0x5bd1e995);
+  h ^= h >>> 15;
+  return ((h >>> 0) + 0.5) / 4294967296;
+}
+
 export function rankFeed(items: FeedItem[], input: RankInput): FeedItem[] {
-  const scored = scoreFeed(items, input).sort(
-    (a, b) => b.score - a.score || a.item.video.id.localeCompare(b.item.video.id)
-  );
-  return diversify(scored.map(s => s.item));
+  const scored = scoreFeed(items, input);
+  const seed = input.seed;
+  const keyed = scored.map(s => ({
+    item: s.item,
+    // seed null: urut murni skor. Selain itu: kunci acak berbobot (makin besar makin di depan).
+    key: seed == null ? s.score : Math.log(unitRandom(seed, s.item.video.id)) / Math.pow(EPS + s.score, GAMMA),
+  }));
+  keyed.sort((a, b) => b.key - a.key || a.item.video.id.localeCompare(b.item.video.id));
+  return diversify(keyed.map(k => k.item));
 }

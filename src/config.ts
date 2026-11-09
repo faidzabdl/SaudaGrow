@@ -1,5 +1,5 @@
 // Satu sumber kebenaran untuk nilai yang dipakai di banyak tempat.
-export const APP_NAME = 'Saudagrow';
+export const APP_NAME = 'SaudaGrow';
 
 // Batas video (sesuai konsep: maksimal 60 detik, hemat server / Green IT).
 export const VIDEO_MAX_SECONDS = 60;

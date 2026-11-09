@@ -3,6 +3,7 @@ import { ColorValue, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { FeatherName } from '../../src/types';
+import { emitHomeRefresh } from '../../src/lib/homeRefresh';
 
 function TabBarIcon({ name, color, size = 24 }: { name: FeatherName; color: ColorValue; size?: number }) {
   return <Feather name={name} size={size} color={color} />;
@@ -27,6 +28,12 @@ export default function TabsLayout() {
     >
       <Tabs.Screen
         name="index"
+        listeners={({ navigation }) => ({
+          // Ketuk tab Home yang sudah aktif = refresh feed (seperti TikTok/Instagram)
+          tabPress: () => {
+            if (navigation.isFocused()) emitHomeRefresh();
+          },
+        })}
         options={{
           title: 'Home',
           tabBarIcon: ({ color }) => <TabBarIcon name="home" color={color} />,

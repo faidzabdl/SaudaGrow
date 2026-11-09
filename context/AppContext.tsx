@@ -16,6 +16,7 @@ interface AppContextType {
   loading: boolean;
   error: string | null;
   coords: Coords | null;
+  markSeen: (videoId: string) => void;
   requestLocation: () => Promise<{ coords: Coords | null; error: string | null }>;
   reload: () => Promise<void>;
   // Aksi di bawah ini mengasumsikan sudah login (layar memakai useLoginGuard).
@@ -33,6 +34,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [rawFeed, setFeed] = useState<FeedItem[]>([]);
   const [order, setOrder] = useState<string[]>([]);
   const [rankTick, setRankTick] = useState(0);
+  // Seed baru setiap data dimuat/di-refresh -> urutan acak berbobot baru; seed sama -> urutan stabil.
+  const [seed, setSeed] = useState<number>(() => Math.floor(Math.random() * 2 ** 31));
+  const seenRef = useRef<Set<string>>(new Set());
   const [coords, setCoords] = useState<Coords | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [likedVideoIds, setLikedVideoIds] = useState<string[]>([]);
@@ -45,6 +49,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFeed(f.data);
     setProducts(p.data);
     setError(f.error ?? p.error);
+    setSeed(Math.floor(Math.random() * 2 ** 31)); // refresh -> acak ulang
     setRankTick(t => t + 1); // data baru -> hitung ulang urutan feed
   }, []);
 
@@ -76,9 +81,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ---- Ranking feed (C2) + diversifikasi UMKM (C3) ----
   // Urutan dihitung HANYA saat data dimuat, riwayat login tersedia, atau lokasi berubah; bukan setiap kali
   // pengguna menyukai/menyimpan, supaya feed tidak berubah urutan saat sedang digulir.
-  const latest = useRef({ feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds });
+  const latest = useRef({ feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds, seed });
   useEffect(() => {
-    latest.current = { feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds };
+    latest.current = { feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds, seed };
   });
 
   // Lokasi senyap: hanya bila izin sudah pernah diberikan (tanpa dialog baru, tanpa menyalakan GPS).
@@ -97,6 +102,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         likedVideoIds: cur.liked,
         savedProductIds: cur.saved,
         now: Date.now(),
+        seed: cur.seed,
+        seenVideoIds: [...seenRef.current], // video yang sudah tampil di sesi ini diturunkan
       }).map(f => f.video.id)
     );
   }, [rankTick, coordsKey]);
@@ -111,6 +118,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
     return ordered;
   }, [rawFeed, order]);
+
+  // Dipanggil layar Home saat sebuah video sudah ditonton beberapa detik. Hanya memengaruhi refresh berikutnya.
+  const markSeen = useCallback((videoId: string) => {
+    seenRef.current.add(videoId);
+  }, []);
 
   const requestLocation = useCallback(async () => {
     const r = await getDeviceLocation();
@@ -177,9 +189,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextType>(
     () => ({
       feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error,
-      coords, requestLocation, reload, toggleLike, toggleSave, trackOrder,
+      coords, markSeen, requestLocation, reload, toggleLike, toggleSave, trackOrder,
     }),
-    [feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, coords, requestLocation, reload, toggleLike, toggleSave, trackOrder]
+    [feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, coords, markSeen, requestLocation, reload, toggleLike, toggleSave, trackOrder]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

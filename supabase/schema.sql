@@ -1,5 +1,5 @@
 -- =====================================================================
--- Saudagrow — schema.sql (TINGKAT A)
+-- SaudaGrow — schema.sql (TINGKAT A)
 -- Jalankan di Supabase Dashboard → SQL Editor (boleh dijalankan ulang).
 -- Isi: profil & peran, UMKM, produk, link pesan, video, like, simpan,
 --      pencatatan klik Pesan, RLS, bucket Storage.

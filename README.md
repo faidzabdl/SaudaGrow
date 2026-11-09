@@ -1,4 +1,4 @@
-# Saudagrow
+# SaudaGrow
 
 Platform *discovery* UMKM kuliner berbasis video vertikal pendek. Pengguna menemukan makanan lewat feed, melihat informasinya, lalu **Pesan** (lewat GoFood / GrabFood / ShopeeFood / WhatsApp) atau **Lihat di Maps**. Aplikasi tidak memproses transaksi sendiri.
 
@@ -112,7 +112,19 @@ Semua tabel memakai Row Level Security; pengguna hanya dapat menulis data milikn
 
 ## Rekomendasi feed
 
-Urutan feed dihitung di perangkat dengan skor sederhana yang bisa dijelaskan (`src/lib/feedRank.ts`): popularitas (suka + 2 x simpan + 3 x klik Pesan, skala log), kesegaran video (meluruh sekitar 10 hari), jarak (hanya bila izin lokasi sudah diberikan), dan, untuk pengguna yang punya riwayat, kecocokan kategori dengan yang pernah disukai atau disimpan. Sinyal yang tidak tersedia dibuang dan bobot sisanya dinormalkan ulang. Setelah itu feed didiversifikasi agar tidak menampilkan UMKM yang sama berturut-turut. Urutan hanya dihitung saat data dimuat, bukan setiap kali pengguna menyukai sesuatu, agar feed tidak berubah saat sedang digulir. Tidak ada penelusuran perilaku di luar tabel di atas.
+Urutan feed dihitung di perangkat dengan skor sederhana yang bisa dijelaskan (`src/lib/feedRank.ts`):
+
+- **popularitas** (suka + 2 x simpan + 3 x klik Pesan, skala log),
+- **kesegaran** video (meluruh sekitar 10 hari),
+- **jarak** (hanya bila izin lokasi sudah diberikan),
+- **kecocokan kategori** (hanya pengguna yang punya riwayat suka/simpan),
+- **penalti sudah ditonton**: video yang sudah tampil di sesi ini dikalikan 0,35 (diturunkan, tidak disembunyikan; riwayat tontonan hanya di memori selama aplikasi terbuka).
+
+Sinyal yang tidak tersedia dibuang dan bobot sisanya dinormalkan ulang. Urutan akhir memakai **acak berbobot** (*weighted random sampling*): video berskor tinggi cenderung di depan, tetapi urutannya berbeda setiap refresh. Setelah itu feed didiversifikasi agar tidak menampilkan UMKM yang sama berturut-turut.
+
+Urutan hanya dihitung ulang saat aplikasi dibuka atau saat refresh (seed acak baru), bukan setiap kali pengguna menyukai sesuatu atau saat riwayat selesai dimuat, agar feed tidak berubah saat sedang digulir. Tidak ada penelusuran perilaku di luar tabel di atas.
+
+**Kontrol feed**: ketuk video untuk jeda/putar; bilah tipis di bawah video bisa diketuk atau digeser untuk maju/mundur; ketuk tab Home yang sudah aktif, ketuk logo SaudaGrow, atau tarik layar dari video pertama untuk refresh (konten diacak ulang); ketuk akun UMKM untuk membuka halaman produk di tab "Tentang UMKM". Video tegak (sekitar 9:16) memenuhi layar, video persegi/landscape tampil utuh dengan ruang hitam.
 
 ## Green IT
 

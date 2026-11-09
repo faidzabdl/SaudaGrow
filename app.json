@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Saudagrow",
+    "name": "SaudaGrow",
     "slug": "saudagrow",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -20,7 +20,6 @@
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.RECORD_AUDIO",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION"
       ]
@@ -35,13 +34,14 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Saudagrow membutuhkan akses foto untuk mengunggah logo dan foto produk UMKM."
+          "photosPermission": "SaudaGrow membutuhkan akses foto untuk mengunggah logo dan foto produk UMKM.",
+          "microphonePermission": false
         }
       ],
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Saudagrow memakai lokasi untuk mengisi koordinat UMKM dan menampilkan makanan terdekat."
+          "locationWhenInUsePermission": "SaudaGrow memakai lokasi untuk mengisi koordinat UMKM dan menampilkan makanan terdekat."
         }
       ]
     ],
