@@ -1,9 +1,11 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, ReactNode } from 'react';
 import { useAuth } from '../src/context/AuthContext';
 import { fetchFeed, fetchProducts } from '../src/services/catalog';
 import { fetchMyEngagement, logOrderClick, setLike, setSave } from '../src/services/engagement';
+import { getDeviceLocation, getLocationIfGranted } from '../src/services/location';
+import { rankFeed } from '../src/lib/feedRank';
 import { notify } from '../src/lib/dialog';
-import type { CatalogProduct, FeedItem, OrderPlatform } from '../src/types';
+import type { CatalogProduct, Coords, FeedItem, OrderPlatform } from '../src/types';
 
 interface AppContextType {
   feed: FeedItem[];
@@ -13,6 +15,8 @@ interface AppContextType {
   savedProductIds: string[];
   loading: boolean;
   error: string | null;
+  coords: Coords | null;
+  requestLocation: () => Promise<{ coords: Coords | null; error: string | null }>;
   reload: () => Promise<void>;
   // Aksi di bawah ini mengasumsikan sudah login (layar memakai useLoginGuard).
   toggleLike: (videoId: string) => Promise<void>;
@@ -26,7 +30,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const userId = session?.user.id ?? null;
 
-  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [rawFeed, setFeed] = useState<FeedItem[]>([]);
+  const [order, setOrder] = useState<string[]>([]);
+  const [rankTick, setRankTick] = useState(0);
+  const [coords, setCoords] = useState<Coords | null>(null);
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [likedVideoIds, setLikedVideoIds] = useState<string[]>([]);
   const [savedProductIds, setSavedProductIds] = useState<string[]>([]);
@@ -38,6 +45,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setFeed(f.data);
     setProducts(p.data);
     setError(f.error ?? p.error);
+    setRankTick(t => t + 1); // data baru -> hitung ulang urutan feed
   }, []);
 
   useEffect(() => {
@@ -50,6 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!userId) {
       setLikedVideoIds([]);
       setSavedProductIds([]);
+      setRankTick(t => t + 1);
       return;
     }
     let cancelled = false;
@@ -57,11 +66,57 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (cancelled) return;
       setLikedVideoIds(e.likedVideoIds);
       setSavedProductIds(e.savedProductIds);
+      setRankTick(t => t + 1); // riwayat tersedia -> personalisasi urutan
     });
     return () => {
       cancelled = true;
     };
   }, [userId]);
+
+  // ---- Ranking feed (C2) + diversifikasi UMKM (C3) ----
+  // Urutan dihitung HANYA saat data dimuat, riwayat login tersedia, atau lokasi berubah; bukan setiap kali
+  // pengguna menyukai/menyimpan, supaya feed tidak berubah urutan saat sedang digulir.
+  const latest = useRef({ feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds });
+  useEffect(() => {
+    latest.current = { feed: rawFeed, coords, liked: likedVideoIds, saved: savedProductIds };
+  });
+
+  // Lokasi senyap: hanya bila izin sudah pernah diberikan (tanpa dialog baru, tanpa menyalakan GPS).
+  useEffect(() => {
+    getLocationIfGranted().then(c => {
+      if (c) setCoords(c);
+    });
+  }, []);
+
+  const coordsKey = coords ? `${coords.lat.toFixed(2)},${coords.lng.toFixed(2)}` : '';
+  useEffect(() => {
+    const cur = latest.current;
+    setOrder(
+      rankFeed(cur.feed, {
+        coords: cur.coords,
+        likedVideoIds: cur.liked,
+        savedProductIds: cur.saved,
+        now: Date.now(),
+      }).map(f => f.video.id)
+    );
+  }, [rankTick, coordsKey]);
+
+  // Item mengikuti `order`; item baru yang belum masuk `order` ditaruh di akhir.
+  const feed = useMemo(() => {
+    const byId = new Map(rawFeed.map(f => [f.video.id, f]));
+    const ordered = order.map(id => byId.get(id)).filter((f): f is FeedItem => !!f);
+    const seen = new Set(order);
+    rawFeed.forEach(f => {
+      if (!seen.has(f.video.id)) ordered.push(f);
+    });
+    return ordered;
+  }, [rawFeed, order]);
+
+  const requestLocation = useCallback(async () => {
+    const r = await getDeviceLocation();
+    if (r.coords) setCoords(r.coords);
+    return r;
+  }, []);
 
   // ---- pembaruan lokal (optimistis); dipakai juga untuk membatalkan bila server menolak ----
   const applyLike = useCallback((videoId: string, on: boolean) => {
@@ -122,9 +177,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppContextType>(
     () => ({
       feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error,
-      reload, toggleLike, toggleSave, trackOrder,
+      coords, requestLocation, reload, toggleLike, toggleSave, trackOrder,
     }),
-    [feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, reload, toggleLike, toggleSave, trackOrder]
+    [feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, coords, requestLocation, reload, toggleLike, toggleSave, trackOrder]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

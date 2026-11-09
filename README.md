@@ -99,7 +99,46 @@ update public.profiles set role = 'admin' where id = '<id-akun-anda>';
 
 ## Data yang dicatat
 
-Klik **Pesan** (pengguna → produk → platform → waktu), like, dan simpan. Data lain (komentar, rating, follow, share, watch time) akan ditambahkan di tahap berikutnya dan didokumentasikan di sini. Semua tabel memakai Row Level Security; pengguna hanya dapat menulis data miliknya sendiri.
+| Data | Isi | Siapa yang bisa membaca |
+|---|---|---|
+| Akun (`profiles`) | nama tampilan, peran | pemilik akun; admin |
+| Daftar UMKM (`umkm`) | data yang diisi saat mendaftar (termasuk nomor legalitas opsional) | UMKM yang sudah disetujui dapat dibaca publik lewat API, termasuk nomor legalitas bila diisi (identitas usaha, mis. NIB); aplikasi tidak menampilkannya ke publik. UMKM yang belum disetujui hanya terbaca pemilik dan admin |
+| Like dan simpan (`likes`, `saves`) | pengguna, video/produk, waktu | pemilik akun; UMKM dan publik hanya melihat jumlah (view statistik) |
+| Klik Pesan (`order_clicks`) | pengguna, produk, platform, waktu | pemilik akun, admin, dan pemilik UMKM atas produknya (aplikasi hanya menampilkan jumlah) |
+| Pencarian AI | **tidak disimpan**; teks hanya diteruskan ke Gemini untuk ditafsirkan | tidak ada |
+| Lokasi perangkat | **tidak dikirim ke server**; dipakai di perangkat untuk jarak dan urutan feed | tidak ada |
+
+Semua tabel memakai Row Level Security; pengguna hanya dapat menulis data miliknya sendiri. Like dan simpan dapat dibatalkan pengguna. Penghapusan akun belum tersedia di aplikasi (admin dapat menghapus akun lewat dashboard Supabase). Data lain (komentar, rating) ditambahkan di tahap berikutnya dan didokumentasikan di sini.
+
+## Rekomendasi feed
+
+Urutan feed dihitung di perangkat dengan skor sederhana yang bisa dijelaskan (`src/lib/feedRank.ts`): popularitas (suka + 2 x simpan + 3 x klik Pesan, skala log), kesegaran video (meluruh sekitar 10 hari), jarak (hanya bila izin lokasi sudah diberikan), dan, untuk pengguna yang punya riwayat, kecocokan kategori dengan yang pernah disukai atau disimpan. Sinyal yang tidak tersedia dibuang dan bobot sisanya dinormalkan ulang. Setelah itu feed didiversifikasi agar tidak menampilkan UMKM yang sama berturut-turut. Urutan hanya dihitung saat data dimuat, bukan setiap kali pengguna menyukai sesuatu, agar feed tidak berubah saat sedang digulir. Tidak ada penelusuran perilaku di luar tabel di atas.
+
+## Green IT
+
+- Batas video 60 detik dan 50 MB; foto dikompres saat dipilih (kualitas 0,5-0,6).
+- Feed hanya memasang satu pemutar video (slide yang sedang terlihat); daftar divirtualisasi, dan pemuatan dibatasi 50 video.
+- Lokasi hanya dibaca saat diperlukan (lokasi terakhir yang diketahui, tanpa menyalakan GPS di latar belakang); pencarian AI hanya dipanggil atas permintaan pengguna.
+
+## Sumber aset dan lisensi
+
+- Kode aplikasi: lisensi MIT (`LICENSE`).
+- Foto, logo, dan video contoh di `supabase/seed.sql` adalah **karya sendiri** yang dibuat dengan skrip (gradien dan bentuk sederhana, ditandai "GAMBAR CONTOH"), tanpa foto atau musik dari pihak lain. Ikon: Feather (`@expo/vector-icons`, lisensi MIT). Pustaka pihak ketiga memakai lisensi masing-masing (Expo, React Native, Supabase).
+- Konten nyata yang diunggah UMKM menjadi tanggung jawab pengunggahnya.
+
+## Build APK (EAS)
+
+`.env` tidak ikut diunggah ke EAS (di-gitignore), jadi variabel publik harus dibuat di EAS. Kunci `publishable` memang dirancang untuk tertanam di aplikasi, jadi aman sebagai `plaintext`; **jangan pernah** memasukkan `secret`/`service_role`.
+
+```bash
+npx eas login
+npx eas init
+npx eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_URL --value https://<project-ref>.supabase.co --visibility plaintext
+npx eas env:create --environment preview --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value <kunci-publishable> --visibility plaintext
+npx eas build --platform android --profile preview
+```
+
+Profil `preview` menghasilkan APK yang bisa diunduh dari tautan di dashboard Expo.
 
 ## Struktur singkat
 
@@ -107,7 +146,7 @@ Klik **Pesan** (pengguna → produk → platform → waktu), like, dan simpan. D
 app/            layar (Expo Router)
 context/        AppContext: katalog, like, simpan (membaca Supabase)
 src/config.ts   nama aplikasi dan konstanta bersama
-src/lib/        klien Supabase, dialog lintas platform
+src/lib/        klien Supabase, dialog, jarak (geo), filter pencarian, ranking feed
 src/services/   akses data (auth, katalog, interaksi, kelola produk, storage, lokasi, smart search)
 src/context/    AuthContext (sesi dan peran)
 src/components/ RequireRole, RemoteImage, ProductForm

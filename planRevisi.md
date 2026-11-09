@@ -94,23 +94,23 @@ Masalah yang sudah teridentifikasi (berdasarkan pembacaan kode, belum dijalankan
 
 ### Tingkat A — WAJIB (target stabil + demo bisa jalan)
 
-- [ ] **A1. Akun dan peran.** Login Google (email+password sebagai cadangan). Tabel `profiles` dengan peran `user | umkm | admin`. Admin ditetapkan manual di database, bukan lewat aplikasi.
-- [ ] **A2. Pendaftaran UMKM.** User mendaftar sebagai UMKM (nama pemilik, nama UMKM, email/HP, alamat, GPS, logo; legalitas opsional) dengan status `pending`.
-- [ ] **A3. Verifikasi admin satu kali.** Admin menyetujui/menolak. `approved` bisa memakai fitur UMKM, `rejected` tidak aktif. Setelah approved tidak perlu persetujuan lagi untuk edit profil, produk, video, atau link pesan.
-- [ ] **A4. Produk.** CRUD produk milik UMKM sendiri (nama, deskripsi, harga, kategori, tag, foto).
-- [ ] **A5. Link pesan per produk.** Satu produk punya beberapa link (GoFood, GrabFood, ShopeeFood, WhatsApp, lainnya).
-- [ ] **A6. Video.** Upload video vertikal 9:16, **maksimal 60 detik**, ke Supabase Storage, terkait ke satu produk (satu produk boleh banyak video). Nama, harga, dan kategori di video **selalu diambil dari data produk** (ubah harga di produk, semua video ikut berubah).
-- [ ] **A7. Feed video asli.** Full-screen vertikal, swipe atas/bawah, putar otomatis video yang terlihat, jeda yang tidak terlihat. Urutan sementara: terbaru.
-- [ ] **A8. Pesan.** Tombol Pesan membuka link platform yang dipilih dan **mencatat klik** (`user → produk → platform → waktu`).
-- [ ] **A9. Maps.** Tombol "Lihat di Maps" membuka Google Maps dari koordinat/alamat UMKM.
-- [ ] **A10. Like dan Simpan** tersimpan di database dan bertahan setelah app ditutup.
-- [ ] **A11. Perbaikan stabilitas** dari daftar masalah di bagian 4 (bug feed, tombol kosong, tab bar, SafeAreaView).
-- [ ] **A12. Branding dan kebersihan repo.** Ganti nama aplikasi dan LICENSE, hapus `.expo/`, tambah README.
+- [x] **A1. Akun dan peran.** *(dikerjakan dengan email + password; login Google tidak dikerjakan, sesuai acceptance test yang menerima salah satunya)* Login Google (email+password sebagai cadangan). Tabel `profiles` dengan peran `user | umkm | admin`. Admin ditetapkan manual di database, bukan lewat aplikasi.
+- [x] **A2. Pendaftaran UMKM.** User mendaftar sebagai UMKM (nama pemilik, nama UMKM, email/HP, alamat, GPS, logo; legalitas opsional) dengan status `pending`.
+- [x] **A3. Verifikasi admin satu kali.** Admin menyetujui/menolak. `approved` bisa memakai fitur UMKM, `rejected` tidak aktif. Setelah approved tidak perlu persetujuan lagi untuk edit profil, produk, video, atau link pesan.
+- [x] **A4. Produk.** CRUD produk milik UMKM sendiri (nama, deskripsi, harga, kategori, tag, foto).
+- [x] **A5. Link pesan per produk.** Satu produk punya beberapa link (GoFood, GrabFood, ShopeeFood, WhatsApp, lainnya).
+- [x] **A6. Video.** Upload video vertikal 9:16, **maksimal 60 detik**, ke Supabase Storage, terkait ke satu produk (satu produk boleh banyak video). Nama, harga, dan kategori di video **selalu diambil dari data produk** (ubah harga di produk, semua video ikut berubah).
+- [x] **A7. Feed video asli.** Full-screen vertikal, swipe atas/bawah, putar otomatis video yang terlihat, jeda yang tidak terlihat. Urutan sementara: terbaru.
+- [x] **A8. Pesan.** Tombol Pesan membuka link platform yang dipilih dan **mencatat klik** (`user → produk → platform → waktu`).
+- [x] **A9. Maps.** Tombol "Lihat di Maps" membuka Google Maps dari koordinat/alamat UMKM.
+- [x] **A10. Like dan Simpan** tersimpan di database dan bertahan setelah app ditutup.
+- [x] **A11. Perbaikan stabilitas** dari daftar masalah di bagian 4 (bug feed, tombol kosong, tab bar, SafeAreaView).
+- [x] **A12. Branding dan kebersihan repo.** Ganti nama aplikasi dan LICENSE, hapus `.expo/`, tambah README.
 - [ ] **A13. Build APK** yang bisa diinstal dan dijalankan di Android.
 
 ### Tingkat B — kalau waktu cukup
 
-- [ ] **B1. Lokasi.** GPS sebagai default, pilih manual, cari berdasarkan kota/radius. Jika GPS ditolak, aplikasi tetap bisa dipakai.
+- [ ] **B1. Lokasi.** *(sebagian: urut terdekat dan jarak dari GPS; belum ada pilih manual/kota/radius)* GPS sebagai default, pilih manual, cari berdasarkan kota/radius. Jika GPS ditolak, aplikasi tetap bisa dipakai.
 - [ ] **B2. Komentar per produk.**
 - [ ] **B3. Rating produk** (1–5, review teks opsional) **hanya setelah user pernah klik Pesan** untuk produk tersebut. Rating UMKM = agregat rating seluruh produknya (tidak ada rating toko langsung).
 - [ ] **B4. Share** link video ke platform lain dan catat aksinya.
@@ -119,7 +119,7 @@ Masalah yang sudah teridentifikasi (berdasarkan pembacaan kode, belum dijalankan
 
 ### Tingkat C — terakhir
 
-- [ ] **C1. Smart Search sebagai fitur AI** (lihat bagian 8). Ini **wajib tampil di video demo**, jadi jadwalkan sebelum hari terakhir.
+- [x] **C1. Smart Search sebagai fitur AI** (lihat bagian 8). Ini **wajib tampil di video demo**, jadi jadwalkan sebelum hari terakhir.
 - [ ] **C2. Skor rekomendasi.** Guest: lokasi, jarak, popularitas, kesegaran. Login: tambah watch time, like, save, follow, share, klik Pesan, preferensi jenis makanan dan harga.
 - [ ] **C3. Diversifikasi feed.** Jangan menampilkan video dari UMKM yang sama berturut-turut. UMKM berbeda dengan produk sama boleh.
 

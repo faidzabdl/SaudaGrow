@@ -14,3 +14,16 @@ export async function getDeviceLocation(): Promise<{ coords: Coords | null; erro
     return { coords: null, error: 'Lokasi tidak tersedia. Aktifkan GPS lalu coba lagi.' };
   }
 }
+
+// Dipakai untuk ranking feed: TIDAK memunculkan dialog izin dan tidak menyalakan GPS.
+// Hanya membaca lokasi terakhir yang diketahui bila izin sudah diberikan sebelumnya (hemat baterai).
+export async function getLocationIfGranted(): Promise<Coords | null> {
+  try {
+    const perm = await Location.getForegroundPermissionsAsync();
+    if (perm.status !== 'granted') return null;
+    const last = await Location.getLastKnownPositionAsync({ maxAge: 30 * 60 * 1000 });
+    return last ? { lat: last.coords.latitude, lng: last.coords.longitude } : null;
+  } catch {
+    return null;
+  }
+}

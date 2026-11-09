@@ -10,7 +10,6 @@ import { useApp } from '../../context/AppContext';
 import { RemoteImage } from '../../src/components/RemoteImage';
 import { formatDistance } from '../../src/lib/geo';
 import { criteriaFromSmart, runSearch } from '../../src/lib/searchFilter';
-import { getDeviceLocation } from '../../src/services/location';
 import { askSmartSearch } from '../../src/services/smartSearch';
 import type { Coords, SmartFilter, SortMode } from '../../src/types';
 
@@ -27,13 +26,12 @@ const SORT_LABEL: Record<Exclude<SortMode, 'default'>, string> = {
 };
 
 export default function SearchScreen() {
-  const { products, loading, reload } = useApp();
+  const { products, loading, reload, coords, requestLocation } = useApp();
   const router = useRouter();
   const [query, setQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [maxPrice, setMaxPrice] = useState<number | null>(null);
   const [nearest, setNearest] = useState(false);
-  const [coords, setCoords] = useState<Coords | null>(null);
   const [smart, setSmart] = useState<SmartFilter | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -72,9 +70,8 @@ export default function SearchScreen() {
 
   const ensureLocation = async (): Promise<Coords | null> => {
     if (coords) return coords;
-    const r = await getDeviceLocation();
-    if (r.coords) setCoords(r.coords);
-    else setNotice(r.error);
+    const r = await requestLocation();
+    if (!r.coords) setNotice(r.error);
     return r.coords;
   };
 

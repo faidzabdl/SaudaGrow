@@ -245,8 +245,11 @@ alter table public.order_clicks enable row level security;
 
 -- profiles
 drop policy if exists profiles_select on public.profiles;
+-- Profil (nama tampilan, peran) hanya terbaca oleh pemiliknya dan admin. Aplikasi hanya membaca profil
+-- miliknya sendiri; nama di tempat lain (mis. nama pemilik UMKM) diambil dari tabel umkm.
 create policy profiles_select on public.profiles
-  for select to anon, authenticated using (true);
+  for select to authenticated
+  using (id = (select auth.uid()) or public.is_admin());
 
 drop policy if exists profiles_update_own on public.profiles;
 create policy profiles_update_own on public.profiles
