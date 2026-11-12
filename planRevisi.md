@@ -98,7 +98,7 @@ Masalah yang sudah teridentifikasi (berdasarkan pembacaan kode, belum dijalankan
 - [x] **A2. Pendaftaran UMKM.** User mendaftar sebagai UMKM (nama pemilik, nama UMKM, email/HP, alamat, GPS, logo; legalitas opsional) dengan status `pending`.
 - [x] **A3. Verifikasi admin satu kali.** Admin menyetujui/menolak. `approved` bisa memakai fitur UMKM, `rejected` tidak aktif. Setelah approved tidak perlu persetujuan lagi untuk edit profil, produk, video, atau link pesan.
 - [x] **A4. Produk.** CRUD produk milik UMKM sendiri (nama, deskripsi, harga, kategori, tag, foto).
-- [x] **A5. Link pesan per produk.** Satu produk punya beberapa link (GoFood, GrabFood, ShopeeFood, WhatsApp, lainnya).
+- [x] **A5. Link pesan per produk.** *(UI mendukung GoFood, GrabFood, ShopeeFood, WhatsApp; platform "lainnya" ada di enum database tetapi belum di UI)* Satu produk punya beberapa link (GoFood, GrabFood, ShopeeFood, WhatsApp, lainnya).
 - [x] **A6. Video.** Upload video vertikal 9:16, **maksimal 60 detik**, ke Supabase Storage, terkait ke satu produk (satu produk boleh banyak video). Nama, harga, dan kategori di video **selalu diambil dari data produk** (ubah harga di produk, semua video ikut berubah).
 - [x] **A7. Feed video asli.** Full-screen vertikal, swipe atas/bawah, putar otomatis video yang terlihat, jeda yang tidak terlihat. Urutan sementara: terbaru.
 - [x] **A8. Pesan.** Tombol Pesan membuka link platform yang dipilih dan **mencatat klik** (`user → produk → platform → waktu`).
@@ -106,22 +106,22 @@ Masalah yang sudah teridentifikasi (berdasarkan pembacaan kode, belum dijalankan
 - [x] **A10. Like dan Simpan** tersimpan di database dan bertahan setelah app ditutup.
 - [x] **A11. Perbaikan stabilitas** dari daftar masalah di bagian 4 (bug feed, tombol kosong, tab bar, SafeAreaView).
 - [x] **A12. Branding dan kebersihan repo.** Ganti nama aplikasi dan LICENSE, hapus `.expo/`, tambah README.
-- [ ] **A13. Build APK** yang bisa diinstal dan dijalankan di Android.
+- [ ] **A13. Build APK** yang bisa diinstal dan dijalankan di Android. *(`eas.json` dan `android.package` sudah siap; APK belum terbukti dibuat dan diuji instal bersih)*
 
 ### Tingkat B — kalau waktu cukup
 
-- [ ] **B1. Lokasi.** *(sebagian: urut terdekat dan jarak dari GPS; belum ada pilih manual/kota/radius)* GPS sebagai default, pilih manual, cari berdasarkan kota/radius. Jika GPS ditolak, aplikasi tetap bisa dipakai.
-- [ ] **B2. Komentar per produk.**
-- [ ] **B3. Rating produk** (1–5, review teks opsional) **hanya setelah user pernah klik Pesan** untuk produk tersebut. Rating UMKM = agregat rating seluruh produknya (tidak ada rating toko langsung).
+- [x] **B1. Lokasi.** *(urut terdekat, jarak dari GPS, dan tab FYP "Terdekat"; tanpa pilih manual/kota/radius)* GPS sebagai default, pilih manual, cari berdasarkan kota/radius. Jika GPS ditolak, aplikasi tetap bisa dipakai.
+- [x] **B2. Komentar per produk.** *(dua percakapan terpisah: komentar produk di tab Komentar halaman produk, dan komentar video di panel pada feed Home karena satu produk bisa punya beberapa video; baca tanpa login, tulis wajib login; hapus oleh penulis/pemilik produk/admin; batas 5 komentar per menit; lihat `supabase/b2_comments.sql`)*
+- [x] **B3. Rating produk** (1–5, review teks opsional) **hanya setelah user pernah klik Pesan** untuk produk tersebut. Rating UMKM = agregat rating seluruh produknya (tidak ada rating toko langsung).
 - [ ] **B4. Share** link video ke platform lain dan catat aksinya.
 - [ ] **B5. Follow UMKM** (hanya disimpan; belum perlu halaman Following).
 - [ ] **B6. Watch time** dicatat berapa pun durasinya.
 
 ### Tingkat C — terakhir
 
-- [x] **C1. Smart Search sebagai fitur AI** (lihat bagian 8). Ini **wajib tampil di video demo**, jadi jadwalkan sebelum hari terakhir.
-- [ ] **C2. Skor rekomendasi.** Guest: lokasi, jarak, popularitas, kesegaran. Login: tambah watch time, like, save, follow, share, klik Pesan, preferensi jenis makanan dan harga.
-- [ ] **C3. Diversifikasi feed.** Jangan menampilkan video dari UMKM yang sama berturut-turut. UMKM berbeda dengan produk sama boleh.
+- [x] **C1. Smart Search sebagai fitur AI** *(Gemini lewat Edge Function; uji end-to-end dengan API key asli sebelum merekam demo)* (lihat bagian 8). Ini **wajib tampil di video demo**, jadi jadwalkan sebelum hari terakhir.
+- [x] **C2. Skor rekomendasi.** *(sebagian: dipakai jarak, kesegaran, popularitas, rating, like, save, klik Pesan, dan afinitas kategori; preferensi harga, watch time, follow, dan share belum dipakai karena B4–B6 belum ada)* Guest: lokasi, jarak, popularitas, kesegaran. Login: tambah watch time, like, save, follow, share, klik Pesan, preferensi jenis makanan dan harga.
+- [x] **C3. Diversifikasi feed.** Jangan menampilkan video dari UMKM yang sama berturut-turut. UMKM berbeda dengan produk sama boleh.
 
 ## 6. Rancangan teknis
 
@@ -223,6 +223,7 @@ Catatan RLS (**wajib diaktifkan di semua tabel**):
 - Perubahan `umkm.status`: hanya admin (`profiles.role = 'admin'`).
 - `ratings` insert: hanya jika ada baris `order_clicks` milik user untuk produk tersebut (policy `with check exists (...)`).
 - Storage: bucket `videos` (publik baca, tulis hanya pemilik UMKM approved), bucket `images`.
+- `umkm.legal_id` (NIB/PIRT) **tidak boleh terbaca publik**: RLS bekerja per baris, jadi hak SELECT kolom dicabut dan nilainya dibaca lewat fungsi `get_umkm_legal_ids()` (pemilik: miliknya, admin: semua). Lihat `supabase/b4_umkm_legal_privacy.sql`.
 - **`service_role` key tidak boleh ada di aplikasi maupun repo.** Hanya `anon` key yang dipakai di klien.
 
 ### 6.2 Struktur kode yang disarankan
@@ -316,12 +317,14 @@ Dari instalasi bersih (HP/emulator Android, tanpa data tersisa):
 8. UMKM A tidak bisa mengubah produk UMKM B (uji RLS).
 9. Tidak ada tombol yang tidak berfungsi, tidak ada tulisan "Simulasi", dan tidak ada nama "LOGICODIX" di UI.
 10. `npx tsc --noEmit` dan `npx expo lint` bersih.
+11. Peran `anon` tidak bisa membaca `umkm.legal_id` (`select legal_id from public.umkm` ditolak); layar Admin tetap menampilkan legalitas.
 
 ## 12. Daftar periksa submission
 
-- [ ] Repo GitHub sesuai yang ditentukan panitia; README lengkap (cara jalan lokal, env, arsitektur, data yang dicatat, label AI, sumber aset)
-- [ ] `.env` tidak ikut ter-commit; `.env.example` ada; `.expo/` tidak ter-commit
-- [ ] LICENSE diganti atas nama tim
+- [ ] Repo GitHub sesuai yang ditentukan panitia *(belum: nama repo/tempat kumpul menunggu jawaban panitia)*
+- [x] README lengkap (cara jalan lokal, env, arsitektur, data yang dicatat, label AI, sumber aset)
+- [ ] `.env` tidak ikut ter-commit; `.env.example` ada; `.expo/` tidak ter-commit *(`.env.example` ada dan `.gitignore` sudah memuat `.env` dan `.expo/`; verifikasi dengan `git ls-files .env .expo` sebelum submit)*
+- [x] LICENSE diganti atas nama tim
 - [ ] Video demo 3–5 menit, tanpa narasi, menampilkan alur utama **dan fitur AI**
 - [ ] Aplikasi bisa dijalankan di laptop final (uji dari clone bersih)
 - [ ] APK (bila diminta panitia)

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Modal, Switch,
   KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -39,22 +39,26 @@ export function ProductForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Isi ulang formulir setiap dibuka (kosong untuk produk baru, terisi untuk edit).
-  useEffect(() => {
-    if (!visible) return;
-    setName(product?.name ?? '');
-    setPrice(product ? String(product.price) : '');
-    setCategory(product?.category ?? '');
-    setDescription(product?.description ?? '');
-    setTags(product?.tags.join(', ') ?? '');
-    setActive(product?.is_active ?? true);
-    const l: LinkState = { ...EMPTY_LINKS };
-    product?.order_links.forEach(o => (l[o.platform] = o.url));
-    setLinks(l);
-    setImageUrl(product?.image_url ?? null);
-    setPhoto(null);
-    setError(null);
-  }, [visible, product]);
+  // Isi ulang formulir setiap dibuka (kosong untuk produk baru, terisi untuk edit). Disesuaikan saat render
+  // (pola resmi React) ketika `visible` atau `product` berubah, alih-alih lewat effect.
+  const [synced, setSynced] = useState<{ visible: boolean; product: ManagedProduct | null }>({ visible: false, product: null });
+  if (synced.visible !== visible || synced.product !== product) {
+    setSynced({ visible, product });
+    if (visible) {
+      setName(product?.name ?? '');
+      setPrice(product ? String(product.price) : '');
+      setCategory(product?.category ?? '');
+      setDescription(product?.description ?? '');
+      setTags(product?.tags.join(', ') ?? '');
+      setActive(product?.is_active ?? true);
+      const l: LinkState = { ...EMPTY_LINKS };
+      product?.order_links.forEach(o => (l[o.platform] = o.url));
+      setLinks(l);
+      setImageUrl(product?.image_url ?? null);
+      setPhoto(null);
+      setError(null);
+    }
+  }
 
   const pickPhoto = async () => {
     const res = await ImagePicker.launchImageLibraryAsync({

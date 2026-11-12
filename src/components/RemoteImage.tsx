@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Image, ImageStyle, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import type { FeatherName } from '../types';
@@ -13,8 +13,9 @@ export function RemoteImage({
   style: StyleProp<ImageStyle>;
   icon?: FeatherName;
 }) {
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [uri]);
+  // Yang dicatat adalah URL yang gagal, bukan boolean: URL baru otomatis dianggap belum gagal (tanpa effect).
+  const [failedUri, setFailedUri] = useState<string | null>(null);
+  const failed = failedUri !== null && failedUri === uri;
 
   if (!uri || failed) {
     return (
@@ -23,7 +24,7 @@ export function RemoteImage({
       </View>
     );
   }
-  return <Image source={{ uri }} style={style} onError={() => setFailed(true)} />;
+  return <Image source={{ uri }} style={style} onError={() => setFailedUri(uri)} />;
 }
 
 const styles = StyleSheet.create({

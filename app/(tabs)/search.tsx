@@ -5,9 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
+import { Feather, Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../context/AppContext';
 import { RemoteImage } from '../../src/components/RemoteImage';
+import { formatRating } from '../../src/components/RatingSection';
 import { formatDistance } from '../../src/lib/geo';
 import { criteriaFromSmart, runSearch } from '../../src/lib/searchFilter';
 import { askSmartSearch } from '../../src/services/smartSearch';
@@ -246,8 +247,17 @@ export default function SearchScreen() {
               <View style={styles.cardFooter}>
                 <Text style={styles.cardPrice}>Rp {item.product.price.toLocaleString('id-ID')}</Text>
                 <View style={styles.ratingRow}>
-                  <Feather name="bookmark" size={11} color="#FF6B35" />
-                  <Text style={styles.ratingText}>{item.product.save_count}</Text>
+                  {item.product.avg_rating !== null && item.product.rating_count > 0 ? (
+                    <>
+                      <Ionicons name="star" size={11} color="#FBBF24" />
+                      <Text style={styles.ratingText}>{formatRating(item.product.avg_rating)}</Text>
+                    </>
+                  ) : (
+                    <>
+                      <Feather name="bookmark" size={11} color="#FF6B35" />
+                      <Text style={styles.ratingText}>{item.product.save_count}</Text>
+                    </>
+                  )}
                 </View>
               </View>
             </View>

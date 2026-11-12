@@ -10,22 +10,46 @@ type ProductRow = Product & { umkm: PublicUmkm; order_links: OrderLink[] };
 type VideoRow = Video & { products: ProductRow };
 interface ProductStat { product_id: string; save_count: number | string; order_count: number | string }
 interface VideoStat { video_id: string; like_count: number | string }
+interface ProductRatingRow { product_id: string; avg_rating: number | string; rating_count: number | string }
+interface UmkmRatingRow { umkm_id: string; avg_rating: number | string; rating_count: number | string }
+interface CommentCountRow { product_id: string; comment_count: number | string }
+interface VideoCommentCountRow { video_id: string; comment_count: number | string }
 
 async function withProductStats(rows: ProductRow[]): Promise<CatalogProduct[]> {
   if (rows.length === 0) return [];
-  const { data } = await supabase
-    .from('product_stats')
-    .select('product_id, save_count, order_count')
-    .in('product_id', rows.map(r => r.id));
+  const umkmIds = Array.from(new Set(rows.map(r => r.umkm.id)));
+  // Rating (B3) dibaca dari view; bila view belum dibuat, hasilnya kosong dan produk tampil tanpa rating.
+  const [ps, pr, ur, cc] = await Promise.all([
+    supabase.from('product_stats').select('product_id, save_count, order_count').in('product_id', rows.map(r => r.id)),
+    supabase.from('product_rating').select('product_id, avg_rating, rating_count').in('product_id', rows.map(r => r.id)),
+    supabase.from('umkm_rating').select('umkm_id, avg_rating, rating_count').in('umkm_id', umkmIds),
+    // Komentar (B2): bila view belum dibuat, hasilnya kosong dan jumlah komentar tampil 0.
+    supabase.from('product_comment_count').select('product_id, comment_count').in('product_id', rows.map(r => r.id)),
+  ]);
   const stats = new Map<string, { save: number; order: number }>();
-  ((data ?? []) as ProductStat[]).forEach(s =>
+  ((ps.data ?? []) as ProductStat[]).forEach(s =>
     stats.set(s.product_id, { save: Number(s.save_count), order: Number(s.order_count) })
   );
+  const pRating = new Map<string, { avg: number; n: number }>();
+  ((pr.data ?? []) as ProductRatingRow[]).forEach(s =>
+    pRating.set(s.product_id, { avg: Number(s.avg_rating), n: Number(s.rating_count) })
+  );
+  const uRating = new Map<string, { avg: number; n: number }>();
+  ((ur.data ?? []) as UmkmRatingRow[]).forEach(s =>
+    uRating.set(s.umkm_id, { avg: Number(s.avg_rating), n: Number(s.rating_count) })
+  );
+  const cCount = new Map<string, number>();
+  ((cc.data ?? []) as CommentCountRow[]).forEach(s => cCount.set(s.product_id, Number(s.comment_count)));
   return rows.map(r => ({
     ...r,
     order_links: r.order_links ?? [],
     save_count: stats.get(r.id)?.save ?? 0,
     order_count: stats.get(r.id)?.order ?? 0,
+    avg_rating: pRating.get(r.id)?.avg ?? null,
+    rating_count: pRating.get(r.id)?.n ?? 0,
+    umkm_avg_rating: uRating.get(r.umkm.id)?.avg ?? null,
+    umkm_rating_count: uRating.get(r.umkm.id)?.n ?? 0,
+    comment_count: cCount.get(r.id) ?? 0,
   }));
 }
 
@@ -69,6 +93,14 @@ export async function fetchFeed(): Promise<{ data: FeedItem[]; error: string | n
   const likes = new Map<string, number>();
   ((likeData ?? []) as VideoStat[]).forEach(s => likes.set(s.video_id, Number(s.like_count)));
 
+  // Komentar video (B2): bila view belum dibuat, hasilnya kosong dan jumlahnya tampil 0.
+  const { data: vcData } = await supabase
+    .from('video_comment_count')
+    .select('video_id, comment_count')
+    .in('video_id', rows.map(r => r.id));
+  const videoComments = new Map<string, number>();
+  ((vcData ?? []) as VideoCommentCountRow[]).forEach(s => videoComments.set(s.video_id, Number(s.comment_count)));
+
   const items: FeedItem[] = [];
   rows.forEach(r => {
     const product = productById.get(r.products.id);
@@ -82,7 +114,13 @@ export async function fetchFeed(): Promise<{ data: FeedItem[]; error: string | n
       duration_sec: r.duration_sec,
       created_at: r.created_at,
     };
-    items.push({ video, videoUrl: videoPublicUrl(video.storage_path), product, like_count: likes.get(video.id) ?? 0 });
+    items.push({
+      video,
+      videoUrl: videoPublicUrl(video.storage_path),
+      product,
+      like_count: likes.get(video.id) ?? 0,
+      comment_count: videoComments.get(video.id) ?? 0,
+    });
   });
   return { data: items, error: null };
 }

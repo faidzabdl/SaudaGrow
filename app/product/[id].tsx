@@ -12,6 +12,9 @@ import { notify } from '../../src/lib/dialog';
 import { useApp } from '../../context/AppContext';
 import { useLoginGuard } from '../../src/hooks/useLoginGuard';
 import { RemoteImage } from '../../src/components/RemoteImage';
+import { RatingSection, Stars, formatRating } from '../../src/components/RatingSection';
+import { CommentSection } from '../../src/components/CommentSection';
+import { ProductVideoModal } from '../../src/components/ProductVideoModal';
 
 const ORDER_OPTIONS: { label: string; badge: string; color: string; key: OrderPlatform }[] = [
   { label: 'GoFood', badge: 'Go', color: '#00AA5B', key: 'gofood' },
@@ -22,11 +25,15 @@ const ORDER_OPTIONS: { label: string; badge: string; color: string; key: OrderPl
 
 export default function ProductDetailScreen() {
   const { id, tab } = useLocalSearchParams<{ id: string; tab?: string }>();
-  const { products, feed, loading, savedProductIds, toggleSave, trackOrder } = useApp();
+  const { products, feed, loading, savedProductIds, toggleSave, trackOrder, reload } = useApp();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const guard = useLoginGuard();
-  const [activeTab, setActiveTab] = useState<'info' | 'umkm'>(tab === 'umkm' ? 'umkm' : 'info');
+  const [activeTab, setActiveTab] = useState<'info' | 'umkm' | 'komentar'>(
+    tab === 'umkm' ? 'umkm' : tab === 'komentar' ? 'komentar' : 'info'
+  );
+  const [playIndex, setPlayIndex] = useState<number | null>(null); // video produk yang sedang diputar (null = tertutup)
+  const [orderTick, setOrderTick] = useState(0); // naik setiap Pesan ditekan -> cek ulang syarat rating
 
   const product = products.find(p => p.id === id);
   const productVideos = feed.filter(f => f.product.id === id);
@@ -68,7 +75,7 @@ export default function ProductDetailScreen() {
     const url = product.order_links.find(l => l.platform === platform)?.url;
     if (!url) return;
     guard(() => {
-      trackOrder(product.id, platform);
+      trackOrder(product.id, platform).then(() => setOrderTick(t => t + 1));
       openLink(url, label);
     });
   };
@@ -92,7 +99,7 @@ export default function ProductDetailScreen() {
         </SafeAreaView>
       </View>
 
-      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
         {/* Product header */}
         <View style={styles.productHeader}>
           {!!product.category && (
@@ -103,6 +110,18 @@ export default function ProductDetailScreen() {
           <Text style={styles.productName}>{product.name}</Text>
           <View style={styles.priceRow}>
             <Text style={styles.price}>Rp {product.price.toLocaleString('id-ID')}</Text>
+          </View>
+          <View style={styles.ratingLine}>
+            {product.avg_rating !== null && product.rating_count > 0 ? (
+              <>
+                <Stars value={product.avg_rating} size={14} />
+                <Text style={styles.ratingLineText}>
+                  {formatRating(product.avg_rating)} ({product.rating_count})
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.ratingLineText}>Belum ada rating</Text>
+            )}
           </View>
         </View>
 
@@ -119,6 +138,14 @@ export default function ProductDetailScreen() {
             onPress={() => setActiveTab('umkm')}
           >
             <Text style={[styles.tabText, activeTab === 'umkm' && styles.tabTextActive]}>Tentang UMKM</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'komentar' && styles.tabActive]}
+            onPress={() => setActiveTab('komentar')}
+          >
+            <Text style={[styles.tabText, activeTab === 'komentar' && styles.tabTextActive]}>
+              {product.comment_count > 0 ? `Komentar (${product.comment_count})` : 'Komentar'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -140,25 +167,38 @@ export default function ProductDetailScreen() {
               </>
             )}
 
+            <RatingSection product={product} orderTick={orderTick} onChanged={reload} />
+
             {productVideos.length > 0 && (
               <>
                 <Text style={styles.sectionTitle}>Video Produk ({productVideos.length})</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.videoScroll}>
-                  {productVideos.map(v => (
-                    <View key={v.video.id} style={styles.videoThumb}>
+                  {productVideos.map((v, i) => (
+                    <TouchableOpacity
+                      key={v.video.id}
+                      style={styles.videoThumb}
+                      onPress={() => setPlayIndex(i)}
+                      activeOpacity={0.85}
+                      accessibilityLabel={`Putar video ${i + 1}`}
+                    >
                       <RemoteImage uri={v.video.thumbnail_url ?? product.image_url} icon="film" style={styles.videoThumbImg} />
                       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.8)']} style={styles.videoGradient} />
                       <View style={styles.videoInfo}>
                         <Feather name="heart" size={14} color="#fff" />
                         <Text style={styles.videoLikes}>{v.like_count.toLocaleString('id-ID')}</Text>
+                        <Feather name="message-circle" size={14} color="#fff" style={{ marginLeft: 8 }} />
+                        <Text style={styles.videoLikes}>{v.comment_count.toLocaleString('id-ID')}</Text>
                       </View>
-                    </View>
+                      <View style={styles.playBadge}>
+                        <Feather name="play" size={22} color="#fff" />
+                      </View>
+                    </TouchableOpacity>
                   ))}
                 </ScrollView>
               </>
             )}
           </View>
-        ) : (
+        ) : activeTab === 'umkm' ? (
           <View style={styles.tabContent}>
             <View style={styles.umkmCard}>
               <RemoteImage uri={umkm.logo_url} icon="user" style={styles.umkmAvatar} />
@@ -181,7 +221,12 @@ export default function ProductDetailScreen() {
             <View style={styles.umkmMeta}>
               <MetaItem icon="bookmark" color="#FF6B35" value={`${product.save_count}`} label="Disimpan" />
               <MetaItem icon="shopping-bag" color="#3B82F6" value={`${product.order_count}`} label="Klik Pesan" />
-              <MetaItem icon="check-circle" color="#10B981" value="Ya" label="Terverifikasi" />
+              <MetaItem
+                icon="star"
+                color="#FBBF24"
+                value={product.umkm_avg_rating !== null ? formatRating(product.umkm_avg_rating) : '-'}
+                label={product.umkm_rating_count > 0 ? `Rating UMKM (${product.umkm_rating_count})` : 'Rating UMKM'}
+              />
             </View>
 
             <Text style={styles.sectionTitle}>Kontak</Text>
@@ -192,10 +237,22 @@ export default function ProductDetailScreen() {
               <Text style={styles.mapsBtnText}>Lihat di Maps</Text>
             </TouchableOpacity>
           </View>
+        ) : (
+          <View style={styles.tabContent}>
+            <CommentSection product={product} onChanged={reload} />
+          </View>
         )}
 
         <View style={{ height: 140 }} />
       </ScrollView>
+
+      <ProductVideoModal
+        visible={playIndex !== null}
+        startIndex={playIndex ?? 0}
+        title={product.name}
+        items={productVideos.map(v => ({ id: v.video.id, uri: v.videoUrl, caption: v.video.caption }))}
+        onClose={() => setPlayIndex(null)}
+      />
 
       {/* Order buttons */}
       <View style={[styles.orderContainer, { paddingBottom: 16 + insets.bottom }]}>
@@ -308,4 +365,7 @@ const styles = StyleSheet.create({
   orderIcon: { width: 28, height: 28, borderRadius: 14, marginBottom: 4, alignItems: 'center', justifyContent: 'center' },
   orderIconText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   orderBtnText: { fontSize: 10, fontWeight: '700' },
+  ratingLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 },
+  ratingLineText: { color: '#9CA3AF', fontSize: 12 },
+  playBadge: { position: 'absolute', top: '50%', left: '50%', marginTop: -20, marginLeft: -20, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' },
 });

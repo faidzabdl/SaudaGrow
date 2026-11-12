@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { RequireRole } from '../src/components/RequireRole';
 import { ProductForm } from '../src/components/ProductForm';
 import { RemoteImage } from '../src/components/RemoteImage';
+import { formatRating } from '../src/components/RatingSection';
 import { useAuth } from '../src/context/AuthContext';
 import { useApp } from '../context/AppContext';
 import { confirmDialog, notify } from '../src/lib/dialog';
@@ -212,6 +213,7 @@ function DashboardContent() {
                 <Text style={styles.cardPrice}>Rp {p.price.toLocaleString('id-ID')}</Text>
                 <Text style={styles.cardMeta}>
                   ♥ {p.videos.reduce((n, v) => n + v.like_count, 0)}  ·  ⚑ {p.save_count}  ·  🛒 {p.order_count}
+                  {p.avg_rating !== null && p.rating_count > 0 ? `  ·  ★ ${formatRating(p.avg_rating)} (${p.rating_count})` : ''}
                 </Text>
               </View>
               {busyId === p.id ? (

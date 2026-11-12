@@ -72,6 +72,11 @@ export interface CatalogProduct extends Product {
   order_links: OrderLink[];
   save_count: number;
   order_count: number;
+  avg_rating: number | null; // null = belum ada rating
+  rating_count: number;
+  umkm_avg_rating: number | null; // agregat rating seluruh produk UMKM
+  umkm_rating_count: number;
+  comment_count: number; // jumlah komentar PRODUK (B2); komentar video dihitung per video di FeedItem
 }
 
 export interface Video {
@@ -89,6 +94,7 @@ export interface FeedItem {
   videoUrl: string;
   product: CatalogProduct;
   like_count: number;
+  comment_count: number; // jumlah komentar VIDEO ini (terpisah dari komentar produk)
 }
 
 // ---- Dashboard UMKM (kelola konten) ----
@@ -99,6 +105,8 @@ export interface ManagedProduct extends Product {
   videos: ManagedVideo[];
   save_count: number;
   order_count: number;
+  avg_rating: number | null;
+  rating_count: number;
 }
 
 export interface DashboardStats {
@@ -137,4 +145,28 @@ export interface SmartFilter {
   urut: Exclude<SortMode, 'default'> | null;
   gunakan_lokasi: boolean;
   kata_kunci: string | null;
+}
+
+// ---- Rating dan ulasan (B3) ----
+export interface MyRating {
+  rating: number;
+  review: string | null;
+}
+
+// ---- Komentar (B2): komentar produk (tab Komentar di halaman produk) dan komentar video (panel di feed) ----
+export interface ProductComment {
+  id: string;
+  product_id: string;
+  body: string;
+  created_at: string;
+  author_name: string;
+  is_owner: boolean; // penulis = pemilik UMKM atas produk ini
+  is_mine: boolean;
+}
+
+export interface Review {
+  rating: number;
+  review: string;
+  created_at: string;
+  is_mine: boolean;
 }

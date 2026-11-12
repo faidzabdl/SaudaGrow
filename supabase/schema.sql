@@ -1,9 +1,9 @@
 -- =====================================================================
--- SaudaGrow — schema.sql (TINGKAT A)
+-- SaudaGrow — schema.sql (TINGKAT A; B3 rating dan B2 komentar ada di bagian akhir berkas)
 -- Jalankan di Supabase Dashboard → SQL Editor (boleh dijalankan ulang).
 -- Isi: profil & peran, UMKM, produk, link pesan, video, like, simpan,
 --      pencatatan klik Pesan, RLS, bucket Storage.
--- Belum termasuk (Tingkat B/C): komentar, rating, follow, share, watch time.
+-- Belum termasuk (Tingkat B/C): follow, share, watch time.
 -- =====================================================================
 
 -- ---------- Tipe ----------
@@ -218,6 +218,26 @@ grant update (display_name, avatar_url) on public.profiles to authenticated;
 revoke update on public.umkm from anon, authenticated;
 grant update (owner_name, name, contact, address, city, lat, lng, logo_url, legal_id)
   on public.umkm to authenticated;
+
+-- Privasi nomor legalitas: RLS bekerja per BARIS, bukan per kolom, jadi legal_id (NIB/PIRT) pada UMKM approved
+-- tadinya terbaca siapa pun lewat API. Hak SELECT dicabut lalu hanya kolom publik yang diberikan kembali.
+-- legal_id hanya bisa dibaca lewat get_umkm_legal_ids() di bawah (pemilik: miliknya; admin: semua).
+-- Kolom baru di tabel umkm TIDAK otomatis terbaca publik; tambahkan ke grant ini bila memang perlu dibuka.
+revoke select on public.umkm from anon, authenticated;
+grant select (id, owner_id, owner_name, name, contact, address, city, lat, lng, logo_url, status, created_at)
+  on public.umkm to anon, authenticated;
+
+create or replace function public.get_umkm_legal_ids()
+returns table (umkm_id uuid, legal_id text)
+language sql stable security definer set search_path = ''
+as $$
+  select u.id, u.legal_id
+  from public.umkm u
+  where u.legal_id is not null
+    and (public.is_admin() or u.owner_id = (select auth.uid()));
+$$;
+revoke execute on function public.get_umkm_legal_ids() from public, anon;
+grant execute on function public.get_umkm_legal_ids() to authenticated;
 
 -- ---------- Statistik publik (hanya angka, tanpa data pengguna) ----------
 create or replace view public.video_stats as
@@ -437,3 +457,271 @@ create policy storage_delete_own_folder on storage.objects
 -- 2) Ganti UUID di bawah dengan id akun Anda (Authentication → Users), lalu jalankan:
 --
 --   update public.profiles set role = 'admin' where id = '00000000-0000-0000-0000-000000000000';
+
+-- =====================================================================
+-- TINGKAT B3: rating dan ulasan produk
+-- Aman dijalankan ulang. Jalankan di Supabase SQL Editor SETELAH schema.sql.
+--
+-- Aturan:
+--  * Rating 1-5 (+ ulasan teks opsional, maks. 500 karakter), satu per pengguna per produk.
+--  * Hanya pengguna yang pernah menekan "Pesan" pada produk itu yang boleh menilai (policy cek order_clicks).
+--    Catatan jujur: ini bukan bukti pembelian, hanya bukti pengguna pernah menuju platform pemesanan.
+--  * Pemilik UMKM tidak bisa menilai produknya sendiri.
+--  * Rating UMKM = agregat rating seluruh produknya (tidak ada rating toko langsung).
+--  * Ulasan tampil anonim ("Pembeli"); tabel ratings hanya terbaca pemiliknya dan admin.
+--    Publik membaca lewat view agregat/ulasan yang hanya memuat produk aktif milik UMKM approved.
+--  * Moderasi: admin dapat menghapus ulasan yang melanggar (delete from public.ratings where ...).
+-- =====================================================================
+
+create table if not exists public.ratings (
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  rating     smallint not null check (rating between 1 and 5),
+  review     text check (review is null or char_length(review) <= 500),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, product_id)
+);
+
+alter table public.ratings enable row level security;
+
+create or replace function public.touch_ratings()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists ratings_touch on public.ratings;
+create trigger ratings_touch before update on public.ratings
+  for each row execute function public.touch_ratings();
+
+drop policy if exists ratings_select on public.ratings;
+create policy ratings_select on public.ratings
+  for select to authenticated
+  using (user_id = (select auth.uid()) or public.is_admin());
+
+drop policy if exists ratings_insert on public.ratings;
+create policy ratings_insert on public.ratings
+  for insert to authenticated
+  with check (
+    user_id = (select auth.uid())
+    and not public.owns_product(product_id)
+    and exists (
+      select 1 from public.order_clicks c
+      where c.user_id = (select auth.uid()) and c.product_id = ratings.product_id
+    )
+  );
+
+drop policy if exists ratings_update on public.ratings;
+create policy ratings_update on public.ratings
+  for update to authenticated
+  using (user_id = (select auth.uid()))
+  with check (user_id = (select auth.uid()));
+
+drop policy if exists ratings_delete on public.ratings;
+create policy ratings_delete on public.ratings
+  for delete to authenticated
+  using (user_id = (select auth.uid()) or public.is_admin());
+
+-- Hanya kolom rating dan review yang boleh diubah (bukan pemilik/produk).
+revoke all on public.ratings from anon, authenticated;
+grant select, insert, delete on public.ratings to authenticated;
+grant update (rating, review) on public.ratings to authenticated;
+
+-- ---------- View publik (hanya produk aktif milik UMKM approved) ----------
+create or replace view public.product_rating as
+  select r.product_id,
+         round(avg(r.rating)::numeric, 2) as avg_rating,
+         count(*)::int as rating_count
+  from public.ratings r
+  join public.products p on p.id = r.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  group by r.product_id;
+
+create or replace view public.umkm_rating as
+  select p.umkm_id,
+         round(avg(r.rating)::numeric, 2) as avg_rating,
+         count(*)::int as rating_count
+  from public.ratings r
+  join public.products p on p.id = r.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  group by p.umkm_id;
+
+create or replace view public.product_reviews as
+  select r.product_id,
+         r.rating,
+         r.review,
+         r.created_at,
+         (r.user_id = (select auth.uid())) as is_mine
+  from public.ratings r
+  join public.products p on p.id = r.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  where r.review is not null and btrim(r.review) <> '';
+
+grant select on public.product_rating, public.umkm_rating, public.product_reviews to anon, authenticated;
+
+-- =====================================================================
+-- TINGKAT B2: komentar produk dan komentar video
+-- Aman dijalankan ulang (juga bila versi sebelumnya yang hanya komentar produk sudah dijalankan).
+-- Jalankan di Supabase SQL Editor SETELAH schema.sql
+-- (isinya juga sudah ada di akhir schema.sql; database baru cukup menjalankan schema.sql).
+--
+-- Dua percakapan yang berbeda, karena satu produk bisa punya beberapa video:
+--  * KOMENTAR PRODUK (video_id kosong): pertanyaan/cerita seputar produknya; tampil di tab Komentar halaman produk.
+--  * KOMENTAR VIDEO (video_id terisi): tanggapan atas satu video; tampil di panel komentar pada feed Home.
+--
+-- Aturan:
+--  * Komentar teks 1-500 karakter pada produk aktif milik UMKM approved. Wajib login; hanya atas nama sendiri.
+--  * Komentar video hanya untuk video yang memang milik produk tersebut (dicek di policy).
+--  * Komentar tidak bisa diedit. Boleh dihapus oleh penulisnya, pemilik UMKM atas produk itu (moderasi), atau admin.
+--  * Batas laju: maksimal 5 komentar per menit per pengguna (anti-spam sederhana).
+--  * Publik membaca lewat view (isi, waktu, NAMA TAMPILAN penulis, penanda pemilik). Id pengguna tidak ditampilkan.
+--    Nama tampilan diisi pengguna saat mendaftar; aplikasi menampilkannya di atas kotak komentar sebelum dikirim.
+--    (Ulasan rating tetap anonim; hanya komentar yang memakai nama.)
+-- =====================================================================
+
+create table if not exists public.comments (
+  id uuid primary key default gen_random_uuid(),
+  product_id uuid not null references public.products(id) on delete cascade,
+  video_id uuid references public.videos(id) on delete cascade,   -- null = komentar produk
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  body text not null check (char_length(btrim(body)) between 1 and 500),
+  created_at timestamptz not null default now()
+);
+
+-- Untuk database yang sudah punya tabel comments dari versi sebelumnya (hanya komentar produk).
+alter table public.comments
+  add column if not exists video_id uuid references public.videos(id) on delete cascade;
+
+create index if not exists idx_comments_product on public.comments(product_id, created_at desc);
+create index if not exists idx_comments_video on public.comments(video_id, created_at desc) where video_id is not null;
+create index if not exists idx_comments_user on public.comments(user_id, created_at desc);
+
+alter table public.comments enable row level security;
+
+-- Boleh dikomentari: produk aktif milik UMKM approved; bila video disebut, video itu harus milik produk tersebut.
+create or replace function public.can_comment_on(p_product_id uuid, p_video_id uuid)
+returns boolean
+language sql stable security definer set search_path = ''
+as $$
+  select exists (
+    select 1 from public.products p
+    join public.umkm u on u.id = p.umkm_id
+    where p.id = p_product_id and p.is_active and u.status = 'approved'
+  )
+  and (
+    p_video_id is null
+    or exists (select 1 from public.videos v where v.id = p_video_id and v.product_id = p_product_id)
+  );
+$$;
+
+-- Batas laju: maksimal 5 komentar per menit per pengguna.
+create or replace function public.limit_comment_rate()
+returns trigger
+language plpgsql security definer set search_path = ''
+as $$
+begin
+  if (
+    select count(*) from public.comments
+    where user_id = new.user_id and created_at > now() - interval '1 minute'
+  ) >= 5 then
+    raise exception 'Terlalu banyak komentar. Coba lagi sebentar lagi.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists comments_rate_limit on public.comments;
+create trigger comments_rate_limit
+  before insert on public.comments
+  for each row execute function public.limit_comment_rate();
+
+-- SELECT juga dibutuhkan agar DELETE ... WHERE/RETURNING bisa menemukan barisnya, jadi pemilik produk
+-- (moderasi) dan admin ikut diberi akses baca, selain penulis.
+drop policy if exists comments_select on public.comments;
+create policy comments_select on public.comments
+  for select to authenticated
+  using (
+    user_id = (select auth.uid())
+    or public.owns_product(product_id)
+    or public.is_admin()
+  );
+
+drop policy if exists comments_insert on public.comments;
+create policy comments_insert on public.comments
+  for insert to authenticated
+  with check (user_id = (select auth.uid()) and public.can_comment_on(product_id, video_id));
+
+-- Fungsi versi lama (satu argumen) tidak dipakai lagi; policy di atas sudah memakai versi baru.
+drop function if exists public.can_comment_on(uuid);
+
+drop policy if exists comments_delete on public.comments;
+create policy comments_delete on public.comments
+  for delete to authenticated
+  using (
+    user_id = (select auth.uid())
+    or public.owns_product(product_id)
+    or public.is_admin()
+  );
+
+-- Komentar tidak bisa diedit (tanpa hak UPDATE).
+revoke all on public.comments from anon, authenticated;
+grant select, insert, delete on public.comments to authenticated;
+
+-- ---------- View publik (hanya produk aktif milik UMKM approved) ----------
+-- Komentar PRODUK (video_id kosong).
+create or replace view public.product_comments as
+  select c.id,
+         c.product_id,
+         c.body,
+         c.created_at,
+         coalesce(nullif(btrim(pr.display_name), ''), 'Pengguna') as author_name,
+         (c.user_id = u.owner_id) as is_owner,
+         (c.user_id = (select auth.uid())) as is_mine
+  from public.comments c
+  join public.profiles pr on pr.id = c.user_id
+  join public.products p on p.id = c.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  where c.video_id is null;
+
+create or replace view public.product_comment_count as
+  select c.product_id,
+         count(*)::int as comment_count
+  from public.comments c
+  join public.products p on p.id = c.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  where c.video_id is null
+  group by c.product_id;
+
+-- Komentar VIDEO (video_id terisi).
+create or replace view public.video_comments as
+  select c.id,
+         c.video_id,
+         c.product_id,
+         c.body,
+         c.created_at,
+         coalesce(nullif(btrim(pr.display_name), ''), 'Pengguna') as author_name,
+         (c.user_id = u.owner_id) as is_owner,
+         (c.user_id = (select auth.uid())) as is_mine
+  from public.comments c
+  join public.profiles pr on pr.id = c.user_id
+  join public.products p on p.id = c.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  where c.video_id is not null;
+
+create or replace view public.video_comment_count as
+  select c.video_id,
+         count(*)::int as comment_count
+  from public.comments c
+  join public.products p on p.id = c.product_id and p.is_active
+  join public.umkm u on u.id = p.umkm_id and u.status = 'approved'
+  where c.video_id is not null
+  group by c.video_id;
+
+grant select on public.product_comments, public.product_comment_count,
+                public.video_comments, public.video_comment_count to anon, authenticated;

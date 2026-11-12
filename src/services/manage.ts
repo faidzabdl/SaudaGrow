@@ -38,6 +38,7 @@ interface ProductRow extends Product { order_links: OrderLink[] | null; videos: 
 interface ProductStat { product_id: string; save_count: number | string; order_count: number | string }
 interface VideoStat { video_id: string; like_count: number | string }
 interface ClickRow { product_id: string; platform: OrderPlatform }
+interface RatingRow { product_id: string; avg_rating: number | string; rating_count: number | string }
 
 // Semua produk milik satu UMKM (termasuk yang nonaktif), beserta statistiknya.
 export async function fetchMyProducts(
@@ -56,13 +57,16 @@ export async function fetchMyProducts(
   const productIds = rows.map(r => r.id);
   const videoIds = rows.flatMap(r => (r.videos ?? []).map(v => v.id));
 
-  const [ps, vs, oc] = await Promise.all([
+  const [ps, vs, oc, rt] = await Promise.all([
     supabase.from('product_stats').select('product_id, save_count, order_count').in('product_id', productIds),
     videoIds.length > 0
       ? supabase.from('video_stats').select('video_id, like_count').in('video_id', videoIds)
       : Promise.resolve({ data: [] as VideoStat[] }),
     supabase.from('order_clicks').select('product_id, platform').in('product_id', productIds),
+    supabase.from('product_rating').select('product_id, avg_rating, rating_count').in('product_id', productIds),
   ]);
+  const ratings = new Map<string, { avg: number; n: number }>();
+  ((rt.data ?? []) as RatingRow[]).forEach(s => ratings.set(s.product_id, { avg: Number(s.avg_rating), n: Number(s.rating_count) }));
 
   const pStats = new Map<string, { save: number; order: number }>();
   ((ps.data ?? []) as ProductStat[]).forEach(s =>
@@ -84,6 +88,8 @@ export async function fetchMyProducts(
       .sort((a, b) => a.created_at.localeCompare(b.created_at)),
     save_count: pStats.get(r.id)?.save ?? 0,
     order_count: pStats.get(r.id)?.order ?? 0,
+    avg_rating: ratings.get(r.id)?.avg ?? null,
+    rating_count: ratings.get(r.id)?.n ?? 0,
   }));
 
   stats.products = products.length;

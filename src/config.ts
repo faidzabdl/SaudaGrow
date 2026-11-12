@@ -9,3 +9,6 @@ export const STORAGE_BUCKETS = {
   videos: 'videos',
   images: 'images',
 } as const;
+
+// Batas teks komentar (harus sama dengan check di supabase/b2_comments.sql).
+export const COMMENT_MAX_CHARS = 500;

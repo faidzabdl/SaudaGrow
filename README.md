@@ -4,7 +4,7 @@ Platform *discovery* UMKM kuliner berbasis video vertikal pendek. Pengguna menem
 
 Dibuat untuk Logicodix 2026 Hackathon (subtema *Local MSME & Creative Economy*).
 
-> Status: **Tahap 3b**. Auth, daftar UMKM, verifikasi admin, feed video, like/simpan/Pesan, dan dashboard UMKM (produk, link pemesanan, upload video, statistik) sudah memakai Supabase. Sisa pekerjaan (Smart Search, fitur Tingkat B, pembersihan) ada di `planRevisi.md`.
+> Status: **MVP lengkap (Tingkat A, Smart Search AI, ranking feed, rating)**. Seluruh fitur memakai Supabase. Rincian cakupan, risiko, dan acceptance test ada di `planRevisi.md`; panduan video demo ada di `docs/naskah-demo.md`.
 
 ## Teknologi
 
@@ -29,6 +29,8 @@ Expo (React Native) · Expo Router · TypeScript · Supabase (Auth, Postgres, St
    Gunakan **hanya kunci publik** (publishable / anon). Jangan memasukkan secret / `service_role` key ke aplikasi atau repo.
 
 3. Buka **SQL Editor** di Supabase, tempel isi `supabase/schema.sql`, lalu **Run**.
+
+   Bila database Anda dibuat dari `schema.sql` versi lama (sebelum perlindungan `legal_id`), jalankan juga `supabase/b4_umkm_legal_privacy.sql` satu kali.
 
    (Opsional, untuk data contoh) Ubah `v_base` di `supabase/seed.sql`, unggah media sesuai daftar di bagian bawah file itu, lalu jalankan di SQL Editor. Jangan dipakai di database produksi.
 
@@ -68,6 +70,43 @@ Kotak pencarian bisa memahami kalimat bebas, mis. "makanan pedas murah dekat sin
    `Invoke-RestMethod -Method Post -Uri "https://<project-ref>.supabase.co/functions/v1/smart-search" -ContentType "application/json" -Body '{"query":"ayam pedas murah dekat sini","categories":["Nasi & Lauk"],"tags":["pedas","ayam"]}'`
    Hasil yang benar: `ok: True` dan objek `filter`.
 
+## Rating dan ulasan (B3)
+
+Pada halaman produk, pengguna dapat memberi rating 1-5 dengan ulasan teks opsional (maks. 500 karakter), mengubah, atau menghapusnya.
+
+- **Syarat**: hanya pengguna yang pernah menekan **Pesan** pada produk itu. Ini dipaksa oleh policy database (tidak hanya di aplikasi). Jujur dinyatakan: ini bukan bukti pembelian, karena aplikasi tidak memproses transaksi.
+- Pemilik UMKM tidak dapat menilai produknya sendiri. Rating UMKM = agregat rating seluruh produknya (tidak ada rating toko langsung).
+- Ulasan tampil **anonim**. Tabel `ratings` hanya terbaca pemiliknya dan admin; publik membaca lewat view `product_rating`, `umkm_rating`, dan `product_reviews` yang hanya memuat produk aktif milik UMKM yang sudah disetujui.
+- **Moderasi**: admin dapat menghapus ulasan yang melanggar lewat SQL Editor: `delete from public.ratings where user_id = '<id>' and product_id = '<id>';`.
+- Rating dipakai sebagai sinyal kualitas pada ranking feed (lihat di atas) dan tampil di kartu Cari, halaman produk, tab Tentang UMKM, dan dashboard UMKM.
+
+**Pemasangan**: jalankan `supabase/b3_ratings.sql` di SQL Editor (aman diulang; isinya juga sudah ada di akhir `schema.sql`). Opsional untuk demo: jalankan `supabase/seed_ratings.sql` setelahnya (4 akun pembeli contoh dan 17 rating; produk 9 dan 12 sengaja tanpa rating).
+
+**Uji**: (1) akun biasa membuka produk yang belum pernah ditekan Pesan: formulir menjelaskan syaratnya; (2) tekan Pesan, kembali ke aplikasi: formulir bintang muncul tanpa membuka ulang halaman; (3) kirim rating: rata-rata dan jumlah di halaman produk dan kartu Cari ikut berubah; (4) ubah lalu hapus rating; (5) akun pemilik UMKM tidak bisa menilai produknya sendiri.
+
+## Komentar (B2): komentar produk dan komentar video
+
+Satu produk bisa punya beberapa video, jadi ada dua percakapan yang sengaja dipisah:
+
+| | Komentar **video** | Komentar **produk** |
+|---|---|---|
+| Untuk | tanggapan atas satu video | pertanyaan dan cerita seputar produknya |
+| Dibuka dari | ikon komentar di Home (panel di bawah video) | tab **Komentar** di halaman produk |
+| Hitungan | per video (angka di ikon komentar, dan di thumbnail video pada halaman produk) | per produk (angka di tab) |
+| Data | `comments.video_id` terisi; view `video_comments`, `video_comment_count` | `comments.video_id` kosong; view `product_comments`, `product_comment_count` |
+
+Aturan yang sama untuk keduanya: membaca terbuka untuk semua, menulis wajib login.
+
+- Komentar teks 1-500 karakter, atas nama sendiri, tidak bisa diedit. Dihapus oleh penulisnya, **pemilik UMKM** atas produk itu (moderasi), atau admin. Komentar pemilik diberi label *Pemilik*, jadi UMKM bisa menjawab.
+- Komentar video hanya diterima untuk video yang memang milik produk itu (dicek di policy database).
+- Batas laju: maksimal 5 komentar per menit per pengguna (trigger database).
+- Berbeda dengan ulasan rating yang anonim, komentar menampilkan **nama tampilan** penulis (diisi saat mendaftar). Aplikasi menunjukkan nama itu di atas kotak komentar sebelum dikirim. Id pengguna tidak ditampilkan; tabel `comments` hanya terbaca penulis, pemilik produk, dan admin, sedangkan publik membaca lewat view (hanya produk aktif milik UMKM approved).
+- Aturan ditegakkan di database (RLS dan trigger), bukan hanya di aplikasi. Panel komentar video punya tautan ke komentar produk, dan sebaliknya tab produk menjelaskan bahwa komentar video ada di videonya.
+
+**Pemasangan**: jalankan `supabase/b2_comments.sql` di SQL Editor (aman diulang, juga bila versi lama yang hanya komentar produk sudah pernah dijalankan; isinya juga sudah ada di akhir `schema.sql`). Tanpa itu aplikasi tetap berjalan, tetapi komentar tidak bisa dimuat dan jumlahnya tampil 0. Opsional untuk demo: jalankan `supabase/seed_comments.sql` setelah `seed.sql` dan `seed_ratings.sql` (8 komentar produk dan 8 komentar video, termasuk balasan pemilik UMKM). Menjalankan ulang kedua seed itu menghapus komentar contoh, jadi jalankan `seed_comments.sql` lagi sesudahnya.
+
+**Uji**: (1) di Home ketuk ikon komentar: panel komentar **video** terbuka dan hanya berisi komentar video itu; (2) buka produk yang sama lewat video lain (bila punya dua video): komentar video tidak tercampur; (3) tab Komentar di halaman produk hanya berisi komentar produk; (4) tamu bisa membaca, kotak tulis diganti ajakan masuk; (5) akun biasa menulis komentar: muncul dengan label *Kamu* dan hitungan ikut bertambah setelah feed dimuat ulang; (6) lebih dari 5 komentar dalam semenit ditolak dengan pesan; (7) akun UMKM approved melihat tombol hapus pada komentar orang lain di produknya sendiri, akun UMKM lain tidak.
+
 ## Uji dashboard UMKM (Gelombang 3b)
 
 1. Masuk dengan akun UMKM yang sudah disetujui → Profil → **Dashboard UMKM**.
@@ -102,13 +141,15 @@ update public.profiles set role = 'admin' where id = '<id-akun-anda>';
 | Data | Isi | Siapa yang bisa membaca |
 |---|---|---|
 | Akun (`profiles`) | nama tampilan, peran | pemilik akun; admin |
-| Daftar UMKM (`umkm`) | data yang diisi saat mendaftar (termasuk nomor legalitas opsional) | UMKM yang sudah disetujui dapat dibaca publik lewat API, termasuk nomor legalitas bila diisi (identitas usaha, mis. NIB); aplikasi tidak menampilkannya ke publik. UMKM yang belum disetujui hanya terbaca pemilik dan admin |
+| Daftar UMKM (`umkm`) | data yang diisi saat mendaftar (termasuk nomor legalitas opsional) | UMKM yang sudah disetujui dapat dibaca publik lewat API, **kecuali nomor legalitas** (NIB/PIRT): kolom `legal_id` hanya terbaca pemiliknya dan admin (hak SELECT kolom + fungsi `get_umkm_legal_ids()`). UMKM yang belum disetujui hanya terbaca pemilik dan admin |
 | Like dan simpan (`likes`, `saves`) | pengguna, video/produk, waktu | pemilik akun; UMKM dan publik hanya melihat jumlah (view statistik) |
 | Klik Pesan (`order_clicks`) | pengguna, produk, platform, waktu | pemilik akun, admin, dan pemilik UMKM atas produknya (aplikasi hanya menampilkan jumlah) |
+| Komentar produk dan video (`comments`) | pengguna, produk, video (kosong bila komentar produk), isi komentar, waktu | publik lewat view `product_comments`: isi, waktu, dan **nama tampilan** penulis (id pengguna tidak ditampilkan); tabelnya hanya terbaca penulis, pemilik produk, dan admin |
+| Rating dan ulasan (`ratings`) | bintang 1-5, ulasan teks opsional, waktu; satu per pengguna per produk | tabel hanya terbaca pemiliknya dan admin; publik hanya melihat rata-rata dan ulasan **anonim** ("Pembeli") lewat view |
 | Pencarian AI | **tidak disimpan**; teks hanya diteruskan ke Gemini untuk ditafsirkan | tidak ada |
 | Lokasi perangkat | **tidak dikirim ke server**; dipakai di perangkat untuk jarak dan urutan feed | tidak ada |
 
-Semua tabel memakai Row Level Security; pengguna hanya dapat menulis data miliknya sendiri. Like dan simpan dapat dibatalkan pengguna. Penghapusan akun belum tersedia di aplikasi (admin dapat menghapus akun lewat dashboard Supabase). Data lain (komentar, rating) ditambahkan di tahap berikutnya dan didokumentasikan di sini.
+Semua tabel memakai Row Level Security; pengguna hanya dapat menulis data miliknya sendiri. Like dan simpan dapat dibatalkan pengguna. Penghapusan akun belum tersedia di aplikasi (admin dapat menghapus akun lewat dashboard Supabase). Data lain (komentar) ditambahkan di tahap berikutnya dan didokumentasikan di sini.
 
 ## Rekomendasi feed
 
@@ -117,6 +158,7 @@ Urutan feed dihitung di perangkat dengan skor sederhana yang bisa dijelaskan (`s
 - **popularitas** (suka + 2 x simpan + 3 x klik Pesan, skala log),
 - **kesegaran** video (meluruh sekitar 10 hari),
 - **jarak** (hanya bila izin lokasi sudah diberikan),
+- **kualitas**: rating produk (rata-rata Bayesian dengan prior 3,5 bernilai 3 rating, sehingga satu rating bintang 5 tidak langsung mengalahkan produk yang punya banyak rating), hanya bila produk sudah punya rating,
 - **kecocokan kategori** (hanya pengguna yang punya riwayat suka/simpan),
 - **penalti sudah ditonton**: video yang sudah tampil di sesi ini dikalikan 0,35 (diturunkan, tidak disembunyikan; riwayat tontonan hanya di memori selama aplikasi terbuka).
 
@@ -124,7 +166,9 @@ Sinyal yang tidak tersedia dibuang dan bobot sisanya dinormalkan ulang. Urutan a
 
 Urutan hanya dihitung ulang saat aplikasi dibuka atau saat refresh (seed acak baru), bukan setiap kali pengguna menyukai sesuatu atau saat riwayat selesai dimuat, agar feed tidak berubah saat sedang digulir. Tidak ada penelusuran perilaku di luar tabel di atas.
 
-**Kontrol feed**: ketuk video untuk jeda/putar; bilah tipis di bawah video bisa diketuk atau digeser untuk maju/mundur; ketuk tab Home yang sudah aktif, ketuk logo SaudaGrow, atau tarik layar dari video pertama untuk refresh (konten diacak ulang); ketuk akun UMKM untuk membuka halaman produk di tab "Tentang UMKM". Video tegak (sekitar 9:16) memenuhi layar, video persegi/landscape tampil utuh dengan ruang hitam.
+**Dua halaman FYP**: tab **Untuk Anda** memakai ranking di atas (diacak berbobot setiap refresh). Tab **Terdekat** mengurutkan dengan **jarak sebagai bobot dominan (50%)** lalu ranking (popularitas, kesegaran, rating, kecocokan) sebagai pembeda antar UMKM yang berdekatan, tanpa pengacakan sehingga yang terdekat benar-benar di depan. Izin lokasi baru diminta saat tab Terdekat dibuka; bila ditolak, halaman menjelaskan alasannya dan tombol untuk mencoba lagi. Lokasi tidak dikirim ke server; jarak ditampilkan pada setiap video bila lokasi diketahui.
+
+**Kontrol feed**: ketuk video untuk jeda/putar; bilah tipis di bawah video bisa diketuk atau digeser untuk maju/mundur; ketuk tab Home yang sudah aktif, ketuk logo SaudaGrow, atau tarik layar dari video pertama untuk refresh (konten diacak ulang); ketuk akun UMKM untuk membuka halaman produk di tab "Tentang UMKM". Video tegak (sekitar 9:16) memenuhi layar, video persegi/landscape tampil utuh dengan ruang hitam. Di halaman produk, ketuk thumbnail pada "Video Produk" untuk memutarnya layar penuh (geser untuk video berikutnya, kontrol sama dengan di feed).
 
 ## Green IT
 
@@ -161,12 +205,38 @@ src/config.ts   nama aplikasi dan konstanta bersama
 src/lib/        klien Supabase, dialog, jarak (geo), filter pencarian, ranking feed
 src/services/   akses data (auth, katalog, interaksi, kelola produk, storage, lokasi, smart search)
 src/context/    AuthContext (sesi dan peran)
-src/components/ RequireRole, RemoteImage, ProductForm
+src/components/ RequireRole, RemoteImage, ProductForm, FeedVideo, RatingSection, CommentSection, ProductVideoModal
 src/types.ts    tipe bersama
-supabase/       schema.sql (skema + RLS), seed.sql (data contoh), functions/smart-search (Edge Function AI)
+supabase/       schema.sql (skema + RLS), b3_ratings.sql, b2_comments.sql, b4_umkm_legal_privacy.sql, seed.sql, seed_ratings.sql, seed_comments.sql, functions/smart-search (Edge Function AI)
 eas.json        profil build (preview = APK)
 planRevisi.md   rencana, cakupan fitur, jadwal
 ```
+
+## Menjalankan untuk penilai
+
+Backend memakai Supabase cloud, jadi aplikasi butuh internet. Tiga jalur, dari yang paling mudah:
+
+1. **APK Android** (disarankan): pasang APK rilis yang disertakan tim di HP atau emulator Android. Tidak perlu Metro, Node, ataupun `.env`.
+2. **Expo Go versi SDK 57**: proyek memakai Expo SDK 57. Expo Go terbaru dari Play Store (SDK 58) **tidak bisa** membukanya; pasang Expo Go SDK 57 dari expo.dev/go. Lalu `npm install`, salin `.env.example` menjadi `.env` dan isi, kemudian `npx expo start -c` dan pindai QR.
+3. **Web** (untuk melihat tata letak saja): `npx expo start --web`. Upload video, GPS, dan gestur geser bisa berbeda dari Android.
+
+Akun uji (pengguna, UMKM, admin) disampaikan terpisah dari repositori ini; admin dibuat dengan SQL pada bagian "Menjadikan akun admin".
+
+## Pengujian
+
+- `npm run typecheck`, `npx expo lint`, dan `npx expo-doctor` harus bersih.
+- `npm run test:logic`: 14 uji logika murni (ranking feed, filter pencarian, jarak) dengan test runner Node (butuh Node 22.6+). Skrip `scripts/test-logic.mjs` menyiapkan salinan sementara karena impor proyek tanpa ekstensi. Bila belum ada skrip di `package.json`: `npm pkg set scripts.test:logic="node scripts/test-logic.mjs"`.
+- Uji manual (acceptance test) mengikuti bagian "Alur yang bisa diuji" dan `planRevisi.md`. Aturan RLS diuji di SQL Editor (contoh ada di bagian rating).
+
+## Batasan yang diketahui
+
+- Login hanya email dan kata sandi (tanpa Google). Pengaturan "Confirm email" dimatikan untuk pengembangan; untuk produksi sebaiknya diaktifkan.
+- Rating dibatasi pada pengguna yang pernah menekan **Pesan**; itu bukan bukti pembelian karena aplikasi tidak memproses transaksi.
+- Penghapusan akun belum tersedia di aplikasi. Share dan follow belum ada (komentar produk dan video sudah, lihat bagian Komentar).
+- Smart Search butuh internet dan kuota Gemini. Endpoint dapat dipanggil tamu (dibatasi panjang teks dan 12 permintaan per menit per IP). Bila gagal, aplikasi memakai pencarian kata kunci.
+- Feed memuat maksimal 50 video per pemuatan (tanpa pagination bertahap karena ranking dihitung atas seluruh kandidat). Daftar divirtualisasi dan hanya satu pemutar aktif.
+- Video yang diunggah tidak dibuatkan thumbnail otomatis; poster memakai foto produk.
+- Logika murni diuji otomatis; layar dan integrasi Supabase diuji manual.
 
 ## Lisensi
 

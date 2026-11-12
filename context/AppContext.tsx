@@ -9,6 +9,7 @@ import type { CatalogProduct, Coords, FeedItem, OrderPlatform } from '../src/typ
 
 interface AppContextType {
   feed: FeedItem[];
+  nearbyFeed: FeedItem[]; // tab Terdekat: jarak dominan + ranking; kosong bila lokasi belum diketahui
   products: CatalogProduct[];
   savedProducts: CatalogProduct[];
   likedVideoIds: string[];
@@ -33,6 +34,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const [rawFeed, setFeed] = useState<FeedItem[]>([]);
   const [order, setOrder] = useState<string[]>([]);
+  const [nearbyOrder, setNearbyOrder] = useState<string[]>([]);
   const [rankTick, setRankTick] = useState(0);
   // Seed baru setiap data dimuat/di-refresh -> urutan acak berbobot baru; seed sama -> urutan stabil.
   const [seed, setSeed] = useState<number>(() => Math.floor(Math.random() * 2 ** 31));
@@ -106,6 +108,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         seenVideoIds: [...seenRef.current], // video yang sudah tampil di sesi ini diturunkan
       }).map(f => f.video.id)
     );
+    // Tab Terdekat: tanpa seed (deterministik), hanya bila lokasi diketahui.
+    setNearbyOrder(
+      cur.coords
+        ? rankFeed(cur.feed, {
+            coords: cur.coords,
+            likedVideoIds: cur.liked,
+            savedProductIds: cur.saved,
+            now: Date.now(),
+            seed: null,
+            mode: 'nearby',
+          }).map(f => f.video.id)
+        : []
+    );
   }, [rankTick, coordsKey]);
 
   // Item mengikuti `order`; item baru yang belum masuk `order` ditaruh di akhir.
@@ -123,6 +138,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const markSeen = useCallback((videoId: string) => {
     seenRef.current.add(videoId);
   }, []);
+
+  const nearbyFeed = useMemo(() => {
+    const byId = new Map(rawFeed.map(f => [f.video.id, f]));
+    return nearbyOrder.map(id => byId.get(id)).filter((f): f is FeedItem => !!f);
+  }, [rawFeed, nearbyOrder]);
 
   const requestLocation = useCallback(async () => {
     const r = await getDeviceLocation();
@@ -188,10 +208,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextType>(
     () => ({
-      feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error,
+      feed, nearbyFeed, products, savedProducts, likedVideoIds, savedProductIds, loading, error,
       coords, markSeen, requestLocation, reload, toggleLike, toggleSave, trackOrder,
     }),
-    [feed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, coords, markSeen, requestLocation, reload, toggleLike, toggleSave, trackOrder]
+    [feed, nearbyFeed, products, savedProducts, likedVideoIds, savedProductIds, loading, error, coords, markSeen, requestLocation, reload, toggleLike, toggleSave, trackOrder]
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
